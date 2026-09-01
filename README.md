@@ -13,8 +13,9 @@
 
 When you hit your hourly or monthly Codex usage limit, you don't need to manually check back and wait. Simply queue tasks with `cq add` and run `cq worker`. The worker:
 1. Detects usage limits and extracts the exact reset time from Codex output (with an automated 60-second safety buffer).
-2. Sets the job status to `waiting_limit` with `next_attempt_at`.
-3. Automatically resumes and executes tasks in priority order as soon as Codex becomes available again.
+2. If no reset timestamp is available, schedules a progressive exponential backoff (starting at 10 minutes, then 20m, 40m, up to 60m).
+3. Sets the job status to `waiting_limit` with `next_attempt_at`.
+4. Automatically resumes and executes tasks in priority order as soon as Codex becomes available again.
 
 ---
 
@@ -23,14 +24,16 @@ When you hit your hourly or monthly Codex usage limit, you don't need to manuall
 - ⚡ **Local SQLite Persistence**: Uses `better-sqlite3` with WAL mode and automatic schema migrations.
 - 🎯 **Priority Queueing**: Supports `high`, `normal`, and `low` priorities (`priority DESC, created_at ASC`).
 - 🤖 **Availability-Aware Worker (`cq worker`)**: Single-concurrency foreground worker that polls SQLite and executes runnable jobs safely.
-- 🔒 **Duplicate Execution Prevention**: Atomic SQLite transactions guarantee two workers will never execute the same job concurrently.
+- 🔒 **Duplicate Execution Prevention**: Atomic SQLite transactions guarantee multiple workers will never execute the same job concurrently.
 - 🕒 **Usage Limit Detection & Reset Extraction**: Encapsulated classifier extracts reset timestamps (e.g. `Sep 1st, 2026 5:32 PM`) + 60s safety buffer.
-- 🔁 **Resilient Retry Policies**: Exponential backoff for rate limits and transient 5xx errors; immediate failure on auth or sandbox violations.
-- 🛑 **Job Cancellation (`cq cancel <id>`)**: Cancel pending or waiting jobs safely.
+- 🔁 **Resilient Retry Policies**: 10m/20m/40m/60m backoff for usage limits without parsed dates; exponential backoff for rate limits and 5xx errors; immediate failure on auth or sandbox violations.
+- 🛑 **Graceful Shutdown & Interrupted State**: On `SIGINT`/`SIGTERM` or crash, active jobs transition to `interrupted` instead of being blindly re-executed.
+- 🔄 **Manual Retry (`cq retry <id>`)**: Reset `interrupted` or `failed` jobs to `pending` while preserving historical attempt counts.
+- ❌ **Job Cancellation (`cq cancel <id>`)**: Cancel `pending`, `waiting_limit`, or `interrupted` jobs safely.
 - 📜 **Streaming JSONL Parser**: Captures output from `codex exec --json --sandbox workspace-write -C <repo>` line by line.
 - 🧵 **Codex Thread Tracking**: Extracts and persists the Codex `thread_id` directly in the database.
 - 🗄 **Raw Log Retention**: Stores unmodified raw JSONL stream logs per job in `~/.codex-queue/logs/job-<id>.jsonl`.
-- 📊 **Status Lifecycle**: `pending` ➔ `running` ➔ `waiting_limit` ➔ `completed` / `failed` / `cancelled`.
+- 📊 **Status Lifecycle**: `pending` ➔ `running` ➔ `waiting_limit` ➔ `completed` / `failed` / `interrupted` / `cancelled`.
 
 ---
 
@@ -92,18 +95,27 @@ Start the continuous queue worker in the foreground:
 cq worker
 ```
 
+Run in verbose mode to view reset extraction and retry policy decisions:
+
+```bash
+cq worker --verbose
+```
+
 **Worker Observability Output:**
 ```text
 codex-queue worker started
 [17:31:02] job #12 starting
 [17:31:04] Codex usage limit reached
+[17:31:04]   Usage limit classified from: stderr message
+[17:31:04]   Reset time extraction: Sep 1, 2026 17:41 (parsed_absolute)
+[17:31:04]   Safety buffer: +60s
 [17:31:04] job #12 waiting until 17:42:00
 
 [17:42:01] job #12 retrying (attempt 2)
 [17:48:12] job #12 completed
 ```
 
-The worker gracefully handles `SIGINT` (Ctrl+C) and `SIGTERM`, safely aborting or waiting for active Codex child processes before exiting.
+The worker gracefully handles `SIGINT` (Ctrl+C) and `SIGTERM`, safely aborting active Codex child processes and marking the job as `interrupted` before exiting.
 
 ---
 
@@ -115,11 +127,11 @@ View all tasks, their priorities, attempts, and next retry schedules:
 cq list
 ```
 
-Filter by status (`pending`, `running`, `waiting_limit`, `completed`, `failed`, `cancelled`):
+Filter by status (`pending`, `running`, `waiting_limit`, `interrupted`, `completed`, `failed`, `cancelled`):
 
 ```bash
 cq list --status waiting_limit
-cq list --status completed
+cq list --status interrupted
 ```
 
 **Example Output:**
@@ -127,7 +139,7 @@ cq list --status completed
 ID    PRIORITY  STATUS         ATTEMPTS  NEXT ATTEMPT         THREAD ID      PROMPT
 ───────────────────────────────────────────────────────────────────────────────────────────────
 #12   high      waiting_limit  1         Sep 1, 05:42:00 PM   -              Hotfix critical memory leak
-#13   normal    pending        0         -                    -              Implement JWT auth
+#13   normal    interrupted    1         -                    -              Interrupted task
 #14   low       pending        0         -                    -              Refactor tests
 
 Total: 3 job(s)
@@ -135,9 +147,19 @@ Total: 3 job(s)
 
 ---
 
-### 4. Execute a Task Immediately (`cq run <id>`)
+### 4. Retry an Interrupted or Failed Task (`cq retry <id>`)
 
-Run a specific job on-demand without starting the worker daemon:
+Return an `interrupted` or `failed` job to `pending` state (preserving the existing attempt count):
+
+```bash
+cq retry 13
+```
+
+---
+
+### 5. Execute a Task Immediately (`cq run <id>`)
+
+Run a specific job on-demand without running the worker:
 
 ```bash
 cq run 12
@@ -145,9 +167,9 @@ cq run 12
 
 ---
 
-### 5. Cancel a Task (`cq cancel <id>`)
+### 6. Cancel a Task (`cq cancel <id>`)
 
-Cancel any `pending` or `waiting_limit` task:
+Cancel any `pending`, `waiting_limit`, or `interrupted` task:
 
 ```bash
 cq cancel 14
@@ -163,10 +185,12 @@ Therefore, `codex-queue` includes an isolated error classification layer (`src/c
 1. First inspects structured error fields if present in JSONL events.
 2. Falls back to human-readable error parsing for usage limits, rate limits, authentication errors, and sandbox violations.
 3. Parses natural language reset strings (e.g. `"Try again at Sep 1st, 2026 5:32 PM"` or `"in 15 minutes"`) and converts them into standardized UTC timestamps.
-4. Adds a **60-second safety buffer** past the reset time to prevent edge-case race conditions on the Codex provider.
-
-> [!NOTE]
-> All regex and string matching is strictly encapsulated inside `src/classifier/`. Once `codex exec` provides structured error codes in future versions, the fallback parser can be removed without altering the rest of the application.
+4. Adds a **60-second safety buffer** past the parsed reset time to prevent edge-case race conditions on the Codex provider.
+5. If no reset timestamp is found, applies a progressive fallback backoff policy for usage limits:
+   - **Attempt 1**: 10 minutes
+   - **Attempt 2**: 20 minutes
+   - **Attempt 3**: 40 minutes
+   - **Attempt 4+**: Capped at 60 minutes
 
 ---
 
