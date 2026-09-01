@@ -10,6 +10,8 @@ function formatStatus(status: JobStatus): string {
       return pc.blue('running');
     case 'waiting_limit':
       return pc.magenta('waiting_limit');
+    case 'interrupted':
+      return pc.cyan('interrupted');
     case 'completed':
       return pc.green('completed');
     case 'failed':
@@ -86,14 +88,19 @@ export async function listCommand(options: { status?: string; limit?: string }):
 
     for (const job of jobs) {
       const idStr = `#${job.id}`.padEnd(5);
-      const prioStr = formatPriority(job.priority) + ' '.repeat(Math.max(0, 9 - (job.priority > 0 ? 4 : job.priority < 0 ? 3 : 6)));
-      const statusColored = formatStatus(job.status) + ' '.repeat(Math.max(0, 14 - job.status.length));
+      const prioStr =
+        formatPriority(job.priority) +
+        ' '.repeat(Math.max(0, 9 - (job.priority > 0 ? 4 : job.priority < 0 ? 3 : 6)));
+      const statusColored =
+        formatStatus(job.status) + ' '.repeat(Math.max(0, 14 - job.status.length));
       const attemptsStr = String(job.attempts || 0).padEnd(9);
       const nextAttemptStr = formatDate(job.next_attempt_at).padEnd(20);
       const threadStr = (job.thread_id || '-').padEnd(14);
       const promptStr = truncate(job.prompt, 30);
 
-      console.log(`${idStr} ${prioStr} ${statusColored} ${attemptsStr} ${nextAttemptStr} ${threadStr} ${promptStr}`);
+      console.log(
+        `${idStr} ${prioStr} ${statusColored} ${attemptsStr} ${nextAttemptStr} ${threadStr} ${promptStr}`
+      );
     }
 
     console.log(pc.gray(`\nTotal: ${jobs.length} job(s)`));

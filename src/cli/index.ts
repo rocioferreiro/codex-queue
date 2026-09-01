@@ -3,6 +3,7 @@ import { addCommand } from './commands/add.js';
 import { listCommand } from './commands/list.js';
 import { runCommand } from './commands/run.js';
 import { cancelCommand } from './commands/cancel.js';
+import { retryCommand } from './commands/retry.js';
 import { workerCommand } from './commands/worker.js';
 
 export function createProgram(): Command {
@@ -24,7 +25,10 @@ export function createProgram(): Command {
   program
     .command('list')
     .description('List queued and executed Codex jobs')
-    .option('-s, --status <status>', 'Filter by status (pending, running, waiting_limit, completed, failed, cancelled)')
+    .option(
+      '-s, --status <status>',
+      'Filter by status (pending, running, waiting_limit, interrupted, completed, failed, cancelled)'
+    )
     .option('-l, --limit <number>', 'Limit the number of results')
     .action(listCommand);
 
@@ -37,14 +41,21 @@ export function createProgram(): Command {
 
   program
     .command('cancel')
-    .description('Cancel a pending or waiting job')
+    .description('Cancel a pending, waiting, or interrupted job')
     .argument('<id>', 'Job ID to cancel')
     .action(cancelCommand);
+
+  program
+    .command('retry')
+    .description('Return an interrupted or failed job to pending state')
+    .argument('<id>', 'Job ID to retry')
+    .action(retryCommand);
 
   program
     .command('worker')
     .description('Start the foreground queue worker to automatically process tasks as capacity allows')
     .option('-i, --interval <ms>', 'Polling interval in milliseconds', '1000')
+    .option('-v, --verbose', 'Print verbose usage limit and scheduling details')
     .action(workerCommand);
 
   return program;
