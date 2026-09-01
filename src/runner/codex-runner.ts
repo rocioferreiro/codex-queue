@@ -10,11 +10,13 @@ import { extractThreadId } from '../parser/events.js';
 import { classifyError } from '../classifier/index.js';
 import { decideRetryAction } from '../policy/index.js';
 import type { RunnerOptions, JobRunner } from './types.js';
-import type { Job, RunnerResult, FailureKind } from '../types/job.js';
+import type { Job, RunnerResult, FailureKind, ResetSource } from '../types/job.js';
 
 export class CodexRunner implements JobRunner {
   private db: Database.Database;
   private activeChild: ChildProcess | null = null;
+  private isAborted = false;
+  private abortReason: string | null = null;
 
   constructor(db?: Database.Database) {
     this.db = db || getDatabase();
@@ -23,7 +25,9 @@ export class CodexRunner implements JobRunner {
   /**
    * Abort currently running child process if any
    */
-  public abort(): void {
+  public abort(reason: string = 'Execution interrupted because worker received SIGINT'): void {
+    this.isAborted = true;
+    this.abortReason = reason;
     if (this.activeChild && !this.activeChild.killed) {
       this.activeChild.kill('SIGTERM');
     }
@@ -49,9 +53,17 @@ export class CodexRunner implements JobRunner {
     const codexBin = options.codexBin || process.env.CQ_CODEX_BIN || 'codex';
     const logPath = getJobLogPath(job.id);
     const startedAt = new Date().toISOString();
-    const attempts = (job.attempts || 0) + 1;
 
-    // Mark job as running
+    this.isAborted = false;
+    this.abortReason = null;
+
+    // Determine attempts count:
+    // If the job was already set to 'running' (e.g. by atomic claimNextRunnableJob),
+    // we preserve job.attempts. If it was pending/waiting_limit, we increment it by 1 here.
+    const alreadyIncremented = job.status === 'running' || options.skipAttemptIncrement;
+    const attempts = alreadyIncremented ? job.attempts : (job.attempts || 0) + 1;
+
+    // Ensure status is running and next_attempt_at is cleared
     updateJobStatus(
       job.id,
       'running',
@@ -59,6 +71,7 @@ export class CodexRunner implements JobRunner {
         started_at: startedAt,
         log_path: logPath,
         error_message: null,
+        next_attempt_at: null,
         attempts,
       },
       this.db
@@ -75,7 +88,6 @@ export class CodexRunner implements JobRunner {
       onEvent: (event) => {
         options.onEvent?.(event);
 
-        // Check for error payload in event
         if (event && typeof event === 'object') {
           const obj = event as Record<string, unknown>;
           if (obj.error || obj.type === 'error' || obj.type?.toString().includes('error')) {
@@ -118,6 +130,32 @@ export class CodexRunner implements JobRunner {
         this.activeChild = null;
         const errorMsg = err instanceof Error ? err.message : String(err);
         const completedAt = new Date().toISOString();
+
+        if (this.isAborted) {
+          updateJobStatus(
+            job.id,
+            'interrupted',
+            {
+              completed_at: completedAt,
+              exit_code: -1,
+              error_message: this.abortReason || errorMsg,
+              last_error: this.abortReason || errorMsg,
+              next_attempt_at: null,
+            },
+            this.db
+          );
+          logStream.end();
+          return resolve({
+            jobId: job.id,
+            threadId,
+            exitCode: -1,
+            logPath,
+            errorMessage: this.abortReason || errorMsg,
+            status: 'aborted',
+            durationMs: Date.now() - startTime,
+          });
+        }
+
         const classification = classifyError(errorMsg, options.referenceDate);
         const retryDecision = decideRetryAction(classification, attempts, options.referenceDate);
 
@@ -151,6 +189,33 @@ export class CodexRunner implements JobRunner {
       childProc.on('error', (err: Error) => {
         this.activeChild = null;
         const completedAt = new Date().toISOString();
+
+        if (this.isAborted) {
+          updateJobStatus(
+            job.id,
+            'interrupted',
+            {
+              completed_at: completedAt,
+              exit_code: -1,
+              error_message: this.abortReason || err.message,
+              last_error: this.abortReason || err.message,
+              next_attempt_at: null,
+            },
+            this.db
+          );
+          parser.flush();
+          logStream.end();
+          return resolve({
+            jobId: job.id,
+            threadId,
+            exitCode: -1,
+            logPath,
+            errorMessage: this.abortReason || err.message,
+            status: 'aborted',
+            durationMs: Date.now() - startTime,
+          });
+        }
+
         const classification = classifyError(err.message, options.referenceDate);
         const retryDecision = decideRetryAction(classification, attempts, options.referenceDate);
 
@@ -170,7 +235,13 @@ export class CodexRunner implements JobRunner {
         parser.flush();
         logStream.end();
 
-        options.onClassifiedError?.(classification.kind, err.message, retryDecision.nextAttemptAt);
+        options.onClassifiedError?.(
+          classification.kind,
+          err.message,
+          retryDecision.nextAttemptAt,
+          retryDecision.resetSource,
+          classification.resetAt ? classification.resetAt.toISOString() : null
+        );
 
         resolve({
           jobId: job.id,
@@ -179,6 +250,8 @@ export class CodexRunner implements JobRunner {
           logPath,
           errorMessage: err.message,
           failureKind: classification.kind,
+          resetSource: retryDecision.resetSource,
+          status: 'codex_failure',
           durationMs: Date.now() - startTime,
         });
       });
@@ -188,12 +261,43 @@ export class CodexRunner implements JobRunner {
         parser.flush();
         logStream.end();
 
+        const completedAt = new Date().toISOString();
+
+        // If runner was intentionally aborted (e.g. SIGINT/SIGTERM from worker shutdown),
+        // we record it as interrupted directly without passing through Codex error classification.
+        if (this.isAborted) {
+          const reason = this.abortReason || 'Execution interrupted because worker received SIGINT';
+          updateJobStatus(
+            job.id,
+            'interrupted',
+            {
+              completed_at: completedAt,
+              exit_code: code ?? -1,
+              error_message: reason,
+              last_error: reason,
+              next_attempt_at: null,
+              thread_id: threadId,
+            },
+            this.db
+          );
+
+          return resolve({
+            jobId: job.id,
+            threadId,
+            exitCode: code ?? -1,
+            logPath,
+            errorMessage: reason,
+            status: 'aborted',
+            durationMs: Date.now() - startTime,
+          });
+        }
+
         const exitCode = code ?? 0;
         const isSuccess = exitCode === 0;
-        const completedAt = new Date().toISOString();
         const rawErrorMessage = stderrContent.trim() || (isSuccess ? null : `Process exited with code ${exitCode}`);
 
         let failureKind: FailureKind | null = null;
+        let resetSource: ResetSource | null = null;
 
         if (isSuccess) {
           updateJobStatus(
@@ -215,6 +319,7 @@ export class CodexRunner implements JobRunner {
           const classification = classifyError(errorSource, options.referenceDate);
           failureKind = classification.kind;
           const retryDecision = decideRetryAction(classification, attempts, options.referenceDate);
+          resetSource = retryDecision.resetSource || null;
 
           updateJobStatus(
             job.id,
@@ -231,7 +336,13 @@ export class CodexRunner implements JobRunner {
             this.db
           );
 
-          options.onClassifiedError?.(classification.kind, classification.message, retryDecision.nextAttemptAt);
+          options.onClassifiedError?.(
+            classification.kind,
+            classification.message,
+            retryDecision.nextAttemptAt,
+            retryDecision.resetSource,
+            classification.resetAt ? classification.resetAt.toISOString() : null
+          );
         }
 
         resolve({
@@ -241,6 +352,8 @@ export class CodexRunner implements JobRunner {
           logPath,
           errorMessage: rawErrorMessage,
           failureKind,
+          resetSource,
+          status: isSuccess ? 'completed' : 'codex_failure',
           durationMs: Date.now() - startTime,
         });
       });

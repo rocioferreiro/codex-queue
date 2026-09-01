@@ -1,4 +1,4 @@
-import type { Job, RunnerResult, FailureKind } from '../types/job.js';
+import type { Job, RunnerResult, FailureKind, ResetSource } from '../types/job.js';
 
 export interface RunnerOptions {
   /**
@@ -28,7 +28,13 @@ export interface RunnerOptions {
   /**
    * Callback fired when an error is classified.
    */
-  onClassifiedError?: (kind: FailureKind, message: string, nextAttemptAt: string | null) => void;
+  onClassifiedError?: (
+    kind: FailureKind,
+    message: string,
+    nextAttemptAt: string | null,
+    resetSource?: ResetSource,
+    extractedResetTime?: string | null
+  ) => void;
   /**
    * Custom spawn function for unit testing.
    */
@@ -37,9 +43,13 @@ export interface RunnerOptions {
    * Reference date for time-based calculations (useful for testing).
    */
   referenceDate?: Date;
+  /**
+   * If true, runner skips incrementing attempts count.
+   */
+  skipAttemptIncrement?: boolean;
 }
 
 export interface JobRunner {
   run(job: Job, options?: RunnerOptions): Promise<RunnerResult>;
-  abort(): void;
+  abort(reason?: string): void;
 }
