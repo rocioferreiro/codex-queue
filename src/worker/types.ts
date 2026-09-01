@@ -11,9 +11,13 @@ export interface WorkerOptions {
    */
   runner?: JobRunner;
   /**
-   * Custom logger function. Defaults to console.log / formatting.
+   * Custom logger function. Defaults to console.log.
    */
   onLog?: (message: string) => void;
+  /**
+   * Enable verbose output for observability (e.g. usage limit classification details).
+   */
+  verbose?: boolean;
   /**
    * Options to pass down to each job runner invocation.
    */
