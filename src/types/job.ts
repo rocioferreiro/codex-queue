@@ -1,4 +1,25 @@
-export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type JobStatus = 'pending' | 'running' | 'waiting_limit' | 'completed' | 'failed' | 'cancelled';
+
+export type FailureKind = 'usage_limit' | 'rate_limit' | 'temporary' | 'auth' | 'sandbox' | 'unknown';
+
+export type PriorityLevel = 'low' | 'normal' | 'high';
+
+export const PRIORITY_MAP: Record<PriorityLevel, number> = {
+  low: -10,
+  normal: 0,
+  high: 10,
+};
+
+export function parsePriority(val: PriorityLevel | string | number | undefined): number {
+  if (typeof val === 'number') return val;
+  if (!val) return PRIORITY_MAP.normal;
+  const lower = val.toLowerCase().trim();
+  if (lower === 'high') return PRIORITY_MAP.high;
+  if (lower === 'low') return PRIORITY_MAP.low;
+  if (lower === 'normal') return PRIORITY_MAP.normal;
+  const num = parseInt(val, 10);
+  return isNaN(num) ? PRIORITY_MAP.normal : num;
+}
 
 export interface Job {
   id: number;
@@ -12,11 +33,17 @@ export interface Job {
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
+  attempts: number;
+  next_attempt_at: string | null;
+  last_error: string | null;
+  failure_kind: FailureKind | null;
+  priority: number;
 }
 
 export interface CreateJobInput {
   prompt: string;
   repo_path?: string;
+  priority?: PriorityLevel | number | string;
 }
 
 export interface JobFilter {
@@ -29,6 +56,7 @@ export interface CodexParsedEvent {
   type?: string;
   thread_id?: string;
   session_id?: string;
+  error?: unknown;
   [key: string]: unknown;
 }
 
@@ -39,4 +67,5 @@ export interface RunnerResult {
   logPath: string;
   errorMessage: string | null;
   durationMs: number;
+  failureKind?: FailureKind | null;
 }
