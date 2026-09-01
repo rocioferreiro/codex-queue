@@ -1,9 +1,11 @@
+import fs from 'node:fs';
 import pc from 'picocolors';
 import type Database from 'better-sqlite3';
 import { getDatabase } from '../db/client.js';
-import { claimNextRunnableJob, recoverRunningJobs, getJobById } from '../db/jobs.js';
+import { claimNextRunnableJob, recoverRunningJobs } from '../db/jobs.js';
 import { JobExecutor } from '../execution/job-executor.js';
-import type { JobRunner } from '../runner/types.js';
+import { getWorkerLogPath, ensureStorageDirs } from '../storage/paths.js';
+import { DaemonManager } from '../daemon/manager.js';
 import type { WorkerOptions, WorkerStatus } from './types.js';
 
 function formatTime(date: Date = new Date()): string {
@@ -26,6 +28,11 @@ function formatDate(isoString: string): string {
   }
 }
 
+function stripAnsi(str: string): string {
+  // eslint-disable-next-line no-control-regex
+  return str.replace(/\u001b\[[0-9;]*m/g, '');
+}
+
 export class QueueWorker {
   private db: Database.Database;
   private pollIntervalMs: number;
@@ -33,6 +40,7 @@ export class QueueWorker {
   private onLog: (message: string) => void;
   private verbose: boolean;
   private runnerOptions: WorkerOptions['runnerOptions'];
+  private logFilePath: string;
 
   private isRunning = false;
   private activeJobId: number | null = null;
@@ -49,6 +57,7 @@ export class QueueWorker {
     this.onLog = options.onLog || ((msg) => console.log(msg));
     this.verbose = options.verbose ?? false;
     this.runnerOptions = options.runnerOptions;
+    this.logFilePath = getWorkerLogPath();
   }
 
   public getStatus(): WorkerStatus {
@@ -60,12 +69,25 @@ export class QueueWorker {
   }
 
   /**
-   * Start the worker loop in foreground
+   * Start the worker loop
    */
   public async start(): Promise<void> {
     if (this.isRunning) return;
     this.isRunning = true;
     this.stopRequested = false;
+
+    // Check if background daemon is already running when running in foreground
+    if (process.env.CQ_DAEMON !== '1') {
+      const daemonManager = new DaemonManager();
+      const daemonStatus = await daemonManager.getStatus();
+      if (daemonStatus.isRunning && daemonStatus.state) {
+        this.log(
+          pc.yellow(
+            `Warning: background codex-queue worker is already running (PID ${daemonStatus.state.pid}). Starting another foreground worker is not recommended.`
+          )
+        );
+      }
+    }
 
     // Recover any orphaned running jobs from previous session crash
     const recovered = recoverRunningJobs(this.db);
@@ -102,6 +124,7 @@ export class QueueWorker {
       }
     }
 
+    this.log('codex-queue worker stopped gracefully');
     this.isRunning = false;
     this.workerPromiseResolve?.();
   }
@@ -202,6 +225,16 @@ export class QueueWorker {
   }
 
   private log(message: string): void {
+    // 1. Output to configured callback / console
     this.onLog(message);
+
+    // 2. Append clean stripped line to worker.log file
+    try {
+      ensureStorageDirs();
+      const plain = stripAnsi(message);
+      fs.appendFileSync(this.logFilePath, `${plain}\n`, 'utf8');
+    } catch {
+      // Ignore file append errors if filesystem is read-only
+    }
   }
 }
