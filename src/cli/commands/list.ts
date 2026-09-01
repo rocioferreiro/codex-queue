@@ -1,6 +1,6 @@
 import pc from 'picocolors';
 import { listJobs } from '../../db/jobs.js';
-import type { Job, JobStatus } from '../../types/job.js';
+import type { JobStatus } from '../../types/job.js';
 
 function formatStatus(status: JobStatus): string {
   switch (status) {
@@ -8,13 +8,23 @@ function formatStatus(status: JobStatus): string {
       return pc.yellow('pending');
     case 'running':
       return pc.blue('running');
+    case 'waiting_limit':
+      return pc.magenta('waiting_limit');
     case 'completed':
       return pc.green('completed');
     case 'failed':
       return pc.red('failed');
+    case 'cancelled':
+      return pc.gray('cancelled');
     default:
       return status;
   }
+}
+
+function formatPriority(priority: number): string {
+  if (priority > 0) return pc.magenta('high');
+  if (priority < 0) return pc.gray('low');
+  return 'normal';
 }
 
 function truncate(str: string, maxLen: number): string {
@@ -24,7 +34,8 @@ function truncate(str: string, maxLen: number): string {
   return singleLine.slice(0, maxLen - 3) + '...';
 }
 
-function formatDate(isoString: string): string {
+function formatDate(isoString: string | null): string {
+  if (!isoString) return '-';
   try {
     const d = new Date(isoString);
     return d.toLocaleString(undefined, {
@@ -62,24 +73,27 @@ export async function listCommand(options: { status?: string; limit?: string }):
       pc.bold(
         [
           'ID'.padEnd(5),
-          'STATUS'.padEnd(12),
-          'THREAD ID'.padEnd(16),
-          'CREATED'.padEnd(18),
+          'PRIORITY'.padEnd(9),
+          'STATUS'.padEnd(14),
+          'ATTEMPTS'.padEnd(9),
+          'NEXT ATTEMPT'.padEnd(20),
+          'THREAD ID'.padEnd(14),
           'PROMPT',
-        ].join('  ')
+        ].join(' ')
       )
     );
-    console.log(pc.gray('─'.repeat(80)));
+    console.log(pc.gray('─'.repeat(95)));
 
     for (const job of jobs) {
       const idStr = `#${job.id}`.padEnd(5);
-      const statusRaw = job.status.padEnd(12);
-      const statusColored = formatStatus(job.status) + ' '.repeat(Math.max(0, 12 - job.status.length));
-      const threadStr = (job.thread_id || '-').padEnd(16);
-      const createdStr = formatDate(job.created_at).padEnd(18);
-      const promptStr = truncate(job.prompt, 40);
+      const prioStr = formatPriority(job.priority) + ' '.repeat(Math.max(0, 9 - (job.priority > 0 ? 4 : job.priority < 0 ? 3 : 6)));
+      const statusColored = formatStatus(job.status) + ' '.repeat(Math.max(0, 14 - job.status.length));
+      const attemptsStr = String(job.attempts || 0).padEnd(9);
+      const nextAttemptStr = formatDate(job.next_attempt_at).padEnd(20);
+      const threadStr = (job.thread_id || '-').padEnd(14);
+      const promptStr = truncate(job.prompt, 30);
 
-      console.log(`${idStr}  ${statusColored}  ${threadStr}  ${createdStr}  ${promptStr}`);
+      console.log(`${idStr} ${prioStr} ${statusColored} ${attemptsStr} ${nextAttemptStr} ${threadStr} ${promptStr}`);
     }
 
     console.log(pc.gray(`\nTotal: ${jobs.length} job(s)`));

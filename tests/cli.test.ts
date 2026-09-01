@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { createProgram } from '../src/cli/index.js';
 import { closeDatabase, initDatabase } from '../src/db/client.js';
-import { listJobs } from '../src/db/jobs.js';
+import { listJobs, getJobById } from '../src/db/jobs.js';
 
 describe('CLI Integration', () => {
   let tempDir: string;
@@ -23,35 +23,58 @@ describe('CLI Integration', () => {
   afterEach(() => {
     closeDatabase();
     process.env = originalEnv;
-    fs.rmSync(tempDir, { recursive: true, force: true });
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup race
+    }
     vi.restoreAllMocks();
   });
 
-  it('adds a job to the queue via CLI add command', async () => {
+  it('adds a job with high priority via CLI', async () => {
     const program = createProgram();
     program.exitOverride();
 
-    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    await program.parseAsync(['node', 'cq', 'add', 'Build documentation website']);
+    await program.parseAsync(['node', 'cq', 'add', 'Build high prio feature', '--priority', 'high']);
 
     const jobs = listJobs();
     expect(jobs).toHaveLength(1);
-    expect(jobs[0].prompt).toBe('Build documentation website');
+    expect(jobs[0].prompt).toBe('Build high prio feature');
+    expect(jobs[0].priority).toBe(10);
     expect(jobs[0].status).toBe('pending');
-    expect(consoleLogSpy).toHaveBeenCalled();
   });
 
-  it('lists jobs in the queue via CLI list command', async () => {
+  it('cancels a pending job via CLI cancel command', async () => {
+    const program = createProgram();
+    program.exitOverride();
+
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    // Add first
+    await program.parseAsync(['node', 'cq', 'add', 'Task to cancel']);
+    const jobs = listJobs();
+    const jobId = jobs[0].id;
+
+    // Cancel
+    const cancelProg = createProgram();
+    cancelProg.exitOverride();
+    await cancelProg.parseAsync(['node', 'cq', 'cancel', String(jobId)]);
+
+    const cancelled = getJobById(jobId);
+    expect(cancelled?.status).toBe('cancelled');
+  });
+
+  it('lists jobs with formatted columns', async () => {
     const program = createProgram();
     program.exitOverride();
 
     const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    // Add first
-    await program.parseAsync(['node', 'cq', 'add', 'Job A']);
+    await program.parseAsync(['node', 'cq', 'add', 'Job 1', '-p', 'high']);
+    await program.parseAsync(['node', 'cq', 'add', 'Job 2', '-p', 'low']);
 
-    // List
     const listProg = createProgram();
     listProg.exitOverride();
     await listProg.parseAsync(['node', 'cq', 'list']);
