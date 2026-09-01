@@ -1,3 +1,5 @@
+import type { ResetSource } from '../types/job.js';
+
 const MONTH_MAP: Record<string, number> = {
   jan: 0, january: 0,
   feb: 1, february: 1,
@@ -13,12 +15,26 @@ const MONTH_MAP: Record<string, number> = {
   dec: 11, december: 11,
 };
 
+export interface ParsedResetResult {
+  date: Date;
+  source: 'parsed_absolute' | 'parsed_relative';
+}
+
 /**
- * Extracts a reset datetime from human-readable Codex error messages or ISO strings.
- * Explicitly supports relative ("in 15 minutes"), ISO ("2026-09-01T17:32:00Z"),
- * and formatted date patterns ("Sep 1st, 2026 5:32 PM UTC").
+ * Extracts a reset datetime and source classification from human-readable Codex error messages or ISO strings.
  */
-export function parseResetDatetime(text: string, referenceDate: Date = new Date()): Date | null {
+export function parseResetDatetime(
+  text: string,
+  referenceDate: Date = new Date()
+): Date | null {
+  const result = parseResetDatetimeWithSource(text, referenceDate);
+  return result ? result.date : null;
+}
+
+export function parseResetDatetimeWithSource(
+  text: string,
+  referenceDate: Date = new Date()
+): ParsedResetResult | null {
   if (!text || typeof text !== 'string') {
     return null;
   }
@@ -32,13 +48,13 @@ export function parseResetDatetime(text: string, referenceDate: Date = new Date(
 
     if (unit.startsWith('min')) {
       result.setMinutes(result.getMinutes() + amount);
-      return result;
+      return { date: result, source: 'parsed_relative' };
     } else if (unit.startsWith('hour') || unit.startsWith('hr')) {
       result.setHours(result.getHours() + amount);
-      return result;
+      return { date: result, source: 'parsed_relative' };
     } else if (unit.startsWith('sec')) {
       result.setSeconds(result.getSeconds() + amount);
-      return result;
+      return { date: result, source: 'parsed_relative' };
     }
   }
 
@@ -47,12 +63,11 @@ export function parseResetDatetime(text: string, referenceDate: Date = new Date(
   if (isoMatch) {
     const d = new Date(isoMatch[0]);
     if (!isNaN(d.getTime())) {
-      return d;
+      return { date: d, source: 'parsed_absolute' };
     }
   }
 
   // 3. Formatted Date: "Sep 1st, 2026 5:32 PM", "October 12, 2026 09:15 AM UTC"
-  // Match month, day (with optional st/nd/rd/th), optional year, time, AM/PM, optional timezone
   const formattedRegex = /(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?(?:[,\s]+at)?[,\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?(?:\s*([A-Za-z0-9_+-]+))?/i;
 
   const match = text.match(formattedRegex);
@@ -77,12 +92,12 @@ export function parseResetDatetime(text: string, referenceDate: Date = new Date(
       if (tz === 'UTC' || tz === 'Z' || tz === 'GMT') {
         const utcDate = new Date(Date.UTC(year, month, day, hours, minutes, seconds));
         if (!isNaN(utcDate.getTime())) {
-          return utcDate;
+          return { date: utcDate, source: 'parsed_absolute' };
         }
       } else {
         const localDate = new Date(year, month, day, hours, minutes, seconds);
         if (!isNaN(localDate.getTime())) {
-          return localDate;
+          return { date: localDate, source: 'parsed_absolute' };
         }
       }
     }

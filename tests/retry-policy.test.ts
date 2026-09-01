@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { decideRetryAction, calculateBackoffMs } from '../src/policy/retry.js';
+import { decideRetryAction, calculateBackoffMs, calculateUsageLimitFallbackBackoffMs } from '../src/policy/retry.js';
 import type { ErrorClassification } from '../src/classifier/types.js';
 
 describe('Retry Policy', () => {
@@ -23,7 +23,7 @@ describe('Retry Policy', () => {
     expect(new Date(action.nextAttemptAt!).getTime()).toBe(expected.getTime());
   });
 
-  it('schedules retry with exponential backoff for usage_limit without reset time', () => {
+  it('schedules retry with 10-minute fallback backoff for usage_limit without reset time', () => {
     const classification: ErrorClassification = {
       kind: 'usage_limit',
       message: 'Usage limit reached without date',
@@ -35,7 +35,7 @@ describe('Retry Policy', () => {
     expect(action.nextStatus).toBe('waiting_limit');
     expect(action.nextAttemptAt).not.toBeNull();
     const delay = new Date(action.nextAttemptAt!).getTime() - now.getTime();
-    expect(delay).toBeGreaterThanOrEqual(30000);
+    expect(delay).toBeGreaterThanOrEqual(600_000); // 10 minutes
   });
 
   it('schedules retry for rate_limit with exponential backoff', () => {
@@ -111,5 +111,12 @@ describe('Retry Policy', () => {
     expect(b2).toBe(60_000); // 60s
     expect(b3).toBe(120_000); // 120s
     expect(b100).toBe(3600_000); // capped at 1h
+  });
+
+  it('calculates usage limit fallback backoff (10m, 20m, 40m, 60m)', () => {
+    expect(calculateUsageLimitFallbackBackoffMs(1)).toBe(600_000); // 10m
+    expect(calculateUsageLimitFallbackBackoffMs(2)).toBe(1_200_000); // 20m
+    expect(calculateUsageLimitFallbackBackoffMs(3)).toBe(2_400_000); // 40m
+    expect(calculateUsageLimitFallbackBackoffMs(4)).toBe(3_600_000); // capped at 60m
   });
 });

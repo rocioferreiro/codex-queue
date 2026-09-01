@@ -1,4 +1,4 @@
-import type { JobStatus } from '../types/job.js';
+import type { JobStatus, ResetSource } from '../types/job.js';
 
 export interface RetryDecision {
   shouldRetry: boolean;
@@ -6,6 +6,7 @@ export interface RetryDecision {
   nextAttemptAt: string | null;
   delayMs: number;
   reason: string;
+  resetSource?: ResetSource;
 }
 
 export interface RetryPolicyConfig {
@@ -14,4 +15,6 @@ export interface RetryPolicyConfig {
   backoffMultiplier?: number;
   safetyBufferMs?: number;
   maxAttempts?: number;
+  usageLimitInitialFallbackMs?: number;
+  usageLimitMaxFallbackMs?: number;
 }

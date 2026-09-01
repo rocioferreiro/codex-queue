@@ -1,6 +1,6 @@
-import type { FailureKind } from '../types/job.js';
+import type { FailureKind, ResetSource } from '../types/job.js';
 import type { ErrorClassification, StructuredErrorInput } from './types.js';
-import { parseResetDatetime } from './reset-parser.js';
+import { parseResetDatetimeWithSource } from './reset-parser.js';
 
 /**
  * Classifies an error from Codex execution into a standardized failure kind.
@@ -15,6 +15,7 @@ export function classifyError(
       kind: 'unknown',
       message: 'Unknown empty error',
       resetAt: null,
+      resetSource: undefined,
     };
   }
 
@@ -26,20 +27,41 @@ export function classifyError(
     const rawCode = obj.code ? String(obj.code) : undefined;
 
     if (code.includes('usage_limit') || code.includes('quota') || code.includes('insufficient_quota')) {
-      const resetAt = obj.reset_at ? new Date(obj.reset_at) : parseResetDatetime(message, referenceDate);
+      let resetAt: Date | null = null;
+      let resetSource: ResetSource | undefined = undefined;
+
+      if (obj.reset_at) {
+        const d = new Date(obj.reset_at);
+        if (!isNaN(d.getTime())) {
+          resetAt = d;
+          resetSource = 'structured';
+        }
+      }
+
+      if (!resetAt) {
+        const parsed = parseResetDatetimeWithSource(message, referenceDate);
+        if (parsed) {
+          resetAt = parsed.date;
+          resetSource = parsed.source;
+        }
+      }
+
       return {
         kind: 'usage_limit',
         message,
-        resetAt: resetAt && !isNaN(resetAt.getTime()) ? resetAt : null,
+        resetAt,
         rawCode,
+        resetSource,
       };
     }
 
     if (code.includes('rate_limit') || code === '429' || code === 'too_many_requests') {
+      const parsed = parseResetDatetimeWithSource(message, referenceDate);
       return {
         kind: 'rate_limit',
         message,
-        resetAt: parseResetDatetime(message, referenceDate),
+        resetAt: parsed ? parsed.date : null,
+        resetSource: parsed ? parsed.source : undefined,
         rawCode,
       };
     }
@@ -62,11 +84,20 @@ export function classifyError(
       };
     }
 
-    if (code.includes('temporary') || code.includes('timeout') || code === '500' || code === '502' || code === '503' || code === '504') {
+    if (
+      code.includes('temporary') ||
+      code.includes('timeout') ||
+      code === '500' ||
+      code === '502' ||
+      code === '503' ||
+      code === '504'
+    ) {
+      const parsed = parseResetDatetimeWithSource(message, referenceDate);
       return {
         kind: 'temporary',
         message,
-        resetAt: parseResetDatetime(message, referenceDate),
+        resetAt: parsed ? parsed.date : null,
+        resetSource: parsed ? parsed.source : undefined,
         rawCode,
       };
     }
@@ -83,7 +114,7 @@ export function classifyError(
 function classifyText(text: string, rawCode?: string, referenceDate: Date = new Date()): ErrorClassification {
   const lower = text.toLowerCase();
 
-  // Usage limit / Quota
+  // Usage limit / Quota / Try again at
   if (
     lower.includes('usage limit') ||
     lower.includes('usage_limit') ||
@@ -92,13 +123,16 @@ function classifyText(text: string, rawCode?: string, referenceDate: Date = new 
     lower.includes('insufficient_quota') ||
     lower.includes('hit your usage limit') ||
     lower.includes('plan limit') ||
-    lower.includes('monthly limit')
+    lower.includes('monthly limit') ||
+    lower.includes('try again at') ||
+    lower.includes('try again in')
   ) {
-    const resetAt = parseResetDatetime(text, referenceDate);
+    const parsed = parseResetDatetimeWithSource(text, referenceDate);
     return {
       kind: 'usage_limit',
       message: text,
-      resetAt,
+      resetAt: parsed ? parsed.date : null,
+      resetSource: parsed ? parsed.source : undefined,
       rawCode,
     };
   }
@@ -110,10 +144,12 @@ function classifyText(text: string, rawCode?: string, referenceDate: Date = new 
     lower.includes('too many requests') ||
     lower.includes('429')
   ) {
+    const parsed = parseResetDatetimeWithSource(text, referenceDate);
     return {
       kind: 'rate_limit',
       message: text,
-      resetAt: parseResetDatetime(text, referenceDate),
+      resetAt: parsed ? parsed.date : null,
+      resetSource: parsed ? parsed.source : undefined,
       rawCode,
     };
   }
@@ -169,10 +205,12 @@ function classifyText(text: string, rawCode?: string, referenceDate: Date = new 
     lower.includes('network error') ||
     lower.includes('server error')
   ) {
+    const parsed = parseResetDatetimeWithSource(text, referenceDate);
     return {
       kind: 'temporary',
       message: text,
-      resetAt: parseResetDatetime(text, referenceDate),
+      resetAt: parsed ? parsed.date : null,
+      resetSource: parsed ? parsed.source : undefined,
       rawCode,
     };
   }
