@@ -20,8 +20,10 @@ export * from './parser/jsonl.js';
 export * from './parser/events.js';
 export * from './execution/index.js';
 
-// Worker
+// Daemon & Worker
+export * from './daemon/index.js';
 export * from './worker/index.js';
 
 // CLI
 export * from './cli/index.js';
+export * from './cli/exit-codes.js';
