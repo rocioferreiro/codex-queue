@@ -13,12 +13,19 @@ import { readJobLog } from '../src/storage/logs.js';
 interface MockChildProcess extends EventEmitter {
   stdout: PassThrough;
   stderr: PassThrough;
+  killed?: boolean;
+  kill: (signal?: string) => void;
 }
 
 function createMockChildProcess(): MockChildProcess {
   const proc = new EventEmitter() as MockChildProcess;
   proc.stdout = new PassThrough();
   proc.stderr = new PassThrough();
+  proc.killed = false;
+  proc.kill = (signal = 'SIGTERM') => {
+    proc.killed = true;
+    proc.emit('close', null, signal);
+  };
   return proc;
 }
 
@@ -33,14 +40,20 @@ describe('CodexRunner', () => {
     process.env.CQ_HOME = tempDir;
     process.env.CQ_DB_PATH = path.join(tempDir, 'test.db');
     process.env.CQ_LOGS_DIR = path.join(tempDir, 'logs');
+    fs.mkdirSync(process.env.CQ_LOGS_DIR, { recursive: true });
     db = initDatabase(':memory:');
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await new Promise((r) => setTimeout(r, 20));
     closeDatabase();
     db.close();
     process.env = originalEnv;
-    fs.rmSync(tempDir, { recursive: true, force: true });
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup race
+    }
   });
 
   it('spawns codex with shell=false and exact arguments', async () => {
@@ -57,7 +70,6 @@ describe('CodexRunner', () => {
       spawnedArgs = [...args];
       spawnedOptions = options;
 
-      // Simulate output and exit
       setTimeout(() => {
         mockProc.stdout.write('{"type":"thread.created","thread_id":"th_mock_999"}\n');
         mockProc.stdout.write('{"type":"turn.completed"}\n');
@@ -99,18 +111,44 @@ describe('CodexRunner', () => {
     expect(updatedJob?.exit_code).toBe(0);
     expect(updatedJob?.completed_at).toBeDefined();
 
-    // Verify log file content
     const logs = readJobLog(job.id);
     expect(logs).toContain('th_mock_999');
   });
 
-  it('handles non-zero exit code as failed job', async () => {
+  it('transitions to waiting_limit when usage limit is detected', async () => {
+    const job = createJob({ prompt: 'Limit test task', repo_path: '/workspace' }, db);
+    const mockProc = createMockChildProcess();
+
+    const mockSpawn = () => {
+      setTimeout(() => {
+        mockProc.stderr.write("You've hit your usage limit. Try again at Sep 1st, 2026 5:32 PM\n");
+        mockProc.emit('close', 1);
+      }, 10);
+      return mockProc as any;
+    };
+
+    const runner = new CodexRunner(db);
+    const result = await runner.run(job, {
+      spawnFn: mockSpawn as any,
+      referenceDate: new Date('2026-09-01T12:00:00.000Z'),
+    });
+
+    expect(result.failureKind).toBe('usage_limit');
+
+    const updatedJob = getJobById(job.id, db);
+    expect(updatedJob?.status).toBe('waiting_limit');
+    expect(updatedJob?.failure_kind).toBe('usage_limit');
+    expect(updatedJob?.next_attempt_at).toBeDefined();
+    expect(updatedJob?.attempts).toBe(1);
+  });
+
+  it('handles non-zero exit code as failed job when error is unknown', async () => {
     const job = createJob({ prompt: 'Failing task', repo_path: '/workspace' }, db);
     const mockProc = createMockChildProcess();
 
     const mockSpawn = () => {
       setTimeout(() => {
-        mockProc.stderr.write('Something went wrong in Codex\n');
+        mockProc.stderr.write('Something unexpected failed in Codex\n');
         mockProc.emit('close', 1);
       }, 10);
       return mockProc as any;
@@ -122,35 +160,29 @@ describe('CodexRunner', () => {
     });
 
     expect(result.exitCode).toBe(1);
-    expect(result.errorMessage).toContain('Something went wrong in Codex');
+    expect(result.errorMessage).toContain('Something unexpected failed in Codex');
 
     const updatedJob = getJobById(job.id, db);
     expect(updatedJob?.status).toBe('failed');
     expect(updatedJob?.exit_code).toBe(1);
-    expect(updatedJob?.error_message).toContain('Something went wrong in Codex');
+    expect(updatedJob?.error_message).toContain('Something unexpected failed in Codex');
   });
 
-  it('handles child process spawn errors gracefully', async () => {
-    const job = createJob({ prompt: 'Error task', repo_path: '/workspace' }, db);
+  it('allows aborting active child process', async () => {
+    const job = createJob({ prompt: 'Long task', repo_path: '/workspace' }, db);
     const mockProc = createMockChildProcess();
 
-    const mockSpawn = () => {
-      setTimeout(() => {
-        mockProc.emit('error', new Error('spawn ENOENT'));
-      }, 10);
-      return mockProc as any;
-    };
+    const mockSpawn = () => mockProc as any;
 
     const runner = new CodexRunner(db);
-    const result = await runner.run(job, {
+    const runPromise = runner.run(job, {
       spawnFn: mockSpawn as any,
     });
 
-    expect(result.exitCode).toBe(-1);
-    expect(result.errorMessage).toBe('spawn ENOENT');
+    runner.abort();
+    expect(mockProc.killed).toBe(true);
 
-    const updatedJob = getJobById(job.id, db);
-    expect(updatedJob?.status).toBe('failed');
-    expect(updatedJob?.error_message).toBe('spawn ENOENT');
+    const result = await runPromise;
+    expect(result.jobId).toBe(job.id);
   });
 });

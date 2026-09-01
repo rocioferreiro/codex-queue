@@ -1,4 +1,4 @@
-import type { Job, RunnerResult } from '../types/job.js';
+import type { Job, RunnerResult, FailureKind } from '../types/job.js';
 
 export interface RunnerOptions {
   /**
@@ -26,11 +26,20 @@ export interface RunnerOptions {
    */
   onStderr?: (chunk: string) => void;
   /**
+   * Callback fired when an error is classified.
+   */
+  onClassifiedError?: (kind: FailureKind, message: string, nextAttemptAt: string | null) => void;
+  /**
    * Custom spawn function for unit testing.
    */
   spawnFn?: typeof import('node:child_process').spawn;
+  /**
+   * Reference date for time-based calculations (useful for testing).
+   */
+  referenceDate?: Date;
 }
 
 export interface JobRunner {
   run(job: Job, options?: RunnerOptions): Promise<RunnerResult>;
+  abort(): void;
 }
