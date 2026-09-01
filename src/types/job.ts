@@ -11,7 +11,19 @@ export type FailureKind = 'usage_limit' | 'rate_limit' | 'temporary' | 'auth' | 
 
 export type PriorityLevel = 'low' | 'normal' | 'high';
 
-export type ResetSource = 'structured' | 'parsed_absolute' | 'parsed_relative' | 'fallback_backoff';
+export type ResetSource =
+  | 'structured'
+  | 'parsed_absolute'
+  | 'parsed_relative'
+  | 'parsed_clock_time'
+  | 'fallback_backoff';
+
+export type ErrorSourceType =
+  | 'turn_failed'
+  | 'jsonl_error'
+  | 'structured_error'
+  | 'stderr_known'
+  | 'stderr_generic';
 
 export const PRIORITY_MAP: Record<PriorityLevel, number> = {
   low: -10,
@@ -66,6 +78,7 @@ export interface CodexParsedEvent {
   thread_id?: string;
   session_id?: string;
   error?: unknown;
+  message?: unknown;
   [key: string]: unknown;
 }
 
@@ -79,4 +92,7 @@ export interface RunnerResult {
   status: 'completed' | 'codex_failure' | 'aborted';
   failureKind?: FailureKind | null;
   resetSource?: ResetSource | null;
+  rawExtractedClock?: string | null;
+  errorSourceType?: ErrorSourceType;
+  errorSourceDescription?: string;
 }

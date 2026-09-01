@@ -1,4 +1,4 @@
-import type { FailureKind, ResetSource } from '../types/job.js';
+import type { FailureKind, ResetSource, ErrorSourceType } from '../types/job.js';
 
 export interface ErrorClassification {
   kind: FailureKind;
@@ -6,6 +6,9 @@ export interface ErrorClassification {
   resetAt: Date | null;
   rawCode?: string;
   resetSource?: ResetSource;
+  rawClock?: string;
+  errorSourceType?: ErrorSourceType;
+  errorSourceDescription?: string;
 }
 
 export interface StructuredErrorInput {

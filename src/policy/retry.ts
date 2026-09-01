@@ -82,6 +82,7 @@ export function decideRetryAction(
           nextAttemptAt: targetTime.toISOString(),
           delayMs,
           resetSource,
+          rawClock: classification.rawClock,
           reason: `Usage limit reached; retrying at ${targetTime.toISOString()} (+60s safety buffer)`,
         };
       } else {

@@ -7,6 +7,7 @@ export interface RetryDecision {
   delayMs: number;
   reason: string;
   resetSource?: ResetSource;
+  rawClock?: string;
 }
 
 export interface RetryPolicyConfig {

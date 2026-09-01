@@ -1,4 +1,4 @@
-import type { FailureKind, ResetSource } from '../types/job.js';
+import type { FailureKind, ResetSource, ErrorSourceType } from '../types/job.js';
 import type { ErrorClassification, StructuredErrorInput } from './types.js';
 import { parseResetDatetimeWithSource } from './reset-parser.js';
 
@@ -16,19 +16,51 @@ export function classifyError(
       message: 'Unknown empty error',
       resetAt: null,
       resetSource: undefined,
+      errorSourceType: 'stderr_generic',
+      errorSourceDescription: 'empty error',
     };
   }
 
   // 1. If structured input object is passed
   if (typeof input === 'object' && input !== null) {
     const obj = input as StructuredErrorInput;
+    const type = typeof obj.type === 'string' ? obj.type.toLowerCase() : '';
     const code = typeof obj.code === 'string' ? obj.code.toLowerCase() : '';
-    const message = typeof obj.message === 'string' ? obj.message : JSON.stringify(input);
+
+    let errorSourceType: ErrorSourceType = 'structured_error';
+    let errorSourceDescription = 'structured error';
+
+    if (type === 'turn.failed' || type === 'turn_failed') {
+      errorSourceType = 'turn_failed';
+      errorSourceDescription = 'JSONL turn.failed';
+    } else if (type === 'error') {
+      errorSourceType = 'jsonl_error';
+      errorSourceDescription = 'JSONL error event';
+    }
+
+    // Extract message from obj.error?.message, obj.message, or string representation
+    let message = '';
+    if (obj.error && typeof obj.error === 'object') {
+      const innerErr = obj.error as Record<string, unknown>;
+      if (typeof innerErr.message === 'string') {
+        message = innerErr.message;
+      } else if (typeof innerErr.code === 'string') {
+        message = `${innerErr.code}: ${JSON.stringify(innerErr)}`;
+      } else {
+        message = JSON.stringify(obj.error);
+      }
+    } else if (typeof obj.message === 'string') {
+      message = obj.message;
+    } else {
+      message = JSON.stringify(input);
+    }
+
     const rawCode = obj.code ? String(obj.code) : undefined;
 
-    if (code.includes('usage_limit') || code.includes('quota') || code.includes('insufficient_quota')) {
+    if (code.includes('usage_limit') || code.includes('quota') || code.includes('insufficient_quota') || message.toLowerCase().includes('usage limit')) {
       let resetAt: Date | null = null;
       let resetSource: ResetSource | undefined = undefined;
+      let rawClock: string | undefined = undefined;
 
       if (obj.reset_at) {
         const d = new Date(obj.reset_at);
@@ -43,6 +75,7 @@ export function classifyError(
         if (parsed) {
           resetAt = parsed.date;
           resetSource = parsed.source;
+          rawClock = parsed.rawClock;
         }
       }
 
@@ -52,35 +85,45 @@ export function classifyError(
         resetAt,
         rawCode,
         resetSource,
+        rawClock,
+        errorSourceType,
+        errorSourceDescription,
       };
     }
 
-    if (code.includes('rate_limit') || code === '429' || code === 'too_many_requests') {
+    if (code.includes('rate_limit') || code === '429' || code === 'too_many_requests' || message.toLowerCase().includes('rate limit')) {
       const parsed = parseResetDatetimeWithSource(message, referenceDate);
       return {
         kind: 'rate_limit',
         message,
         resetAt: parsed ? parsed.date : null,
         resetSource: parsed ? parsed.source : undefined,
+        rawClock: parsed?.rawClock,
         rawCode,
+        errorSourceType,
+        errorSourceDescription,
       };
     }
 
-    if (code.includes('auth') || code.includes('unauthorized') || code === '401' || code === '403') {
+    if (code.includes('auth') || code.includes('unauthorized') || code === '401' || code === '403' || message.toLowerCase().includes('unauthorized')) {
       return {
         kind: 'auth',
         message,
         resetAt: null,
         rawCode,
+        errorSourceType,
+        errorSourceDescription,
       };
     }
 
-    if (code.includes('sandbox') || code.includes('permission_denied')) {
+    if (code.includes('sandbox') || code.includes('permission_denied') || message.toLowerCase().includes('sandbox')) {
       return {
         kind: 'sandbox',
         message,
         resetAt: null,
         rawCode,
+        errorSourceType,
+        errorSourceDescription,
       };
     }
 
@@ -98,15 +141,23 @@ export function classifyError(
         message,
         resetAt: parsed ? parsed.date : null,
         resetSource: parsed ? parsed.source : undefined,
+        rawClock: parsed?.rawClock,
         rawCode,
+        errorSourceType,
+        errorSourceDescription,
       };
     }
 
-    // If code wasn't matched directly, fall through to text classification on message
-    return classifyText(message, rawCode, referenceDate);
+    // Fall through to text classification on message
+    const textClassified = classifyText(message, rawCode, referenceDate);
+    return {
+      ...textClassified,
+      errorSourceType,
+      errorSourceDescription,
+    };
   }
 
-  // 2. Text-based classification
+  // 2. Text-based classification (stderr fallback)
   const text = String(input);
   return classifyText(text, undefined, referenceDate);
 }
@@ -133,7 +184,10 @@ function classifyText(text: string, rawCode?: string, referenceDate: Date = new 
       message: text,
       resetAt: parsed ? parsed.date : null,
       resetSource: parsed ? parsed.source : undefined,
+      rawClock: parsed?.rawClock,
       rawCode,
+      errorSourceType: 'stderr_known',
+      errorSourceDescription: 'stderr message',
     };
   }
 
@@ -150,7 +204,10 @@ function classifyText(text: string, rawCode?: string, referenceDate: Date = new 
       message: text,
       resetAt: parsed ? parsed.date : null,
       resetSource: parsed ? parsed.source : undefined,
+      rawClock: parsed?.rawClock,
       rawCode,
+      errorSourceType: 'stderr_known',
+      errorSourceDescription: 'stderr message',
     };
   }
 
@@ -171,6 +228,8 @@ function classifyText(text: string, rawCode?: string, referenceDate: Date = new 
       message: text,
       resetAt: null,
       rawCode,
+      errorSourceType: 'stderr_known',
+      errorSourceDescription: 'stderr message',
     };
   }
 
@@ -187,6 +246,8 @@ function classifyText(text: string, rawCode?: string, referenceDate: Date = new 
       message: text,
       resetAt: null,
       rawCode,
+      errorSourceType: 'stderr_known',
+      errorSourceDescription: 'stderr message',
     };
   }
 
@@ -211,7 +272,10 @@ function classifyText(text: string, rawCode?: string, referenceDate: Date = new 
       message: text,
       resetAt: parsed ? parsed.date : null,
       resetSource: parsed ? parsed.source : undefined,
+      rawClock: parsed?.rawClock,
       rawCode,
+      errorSourceType: 'stderr_known',
+      errorSourceDescription: 'stderr message',
     };
   }
 
@@ -220,5 +284,7 @@ function classifyText(text: string, rawCode?: string, referenceDate: Date = new 
     message: text,
     resetAt: null,
     rawCode,
+    errorSourceType: 'stderr_generic',
+    errorSourceDescription: 'stderr message',
   };
 }

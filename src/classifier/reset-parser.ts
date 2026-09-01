@@ -17,7 +17,8 @@ const MONTH_MAP: Record<string, number> = {
 
 export interface ParsedResetResult {
   date: Date;
-  source: 'parsed_absolute' | 'parsed_relative';
+  source: 'parsed_absolute' | 'parsed_relative' | 'parsed_clock_time';
+  rawClock?: string;
 }
 
 /**
@@ -67,7 +68,7 @@ export function parseResetDatetimeWithSource(
     }
   }
 
-  // 3. Formatted Date: "Sep 1st, 2026 5:32 PM", "October 12, 2026 09:15 AM UTC"
+  // 3. Formatted Date with month: "Sep 1st, 2026 5:32 PM", "October 12, 2026 09:15 AM UTC"
   const formattedRegex = /(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?(?:[,\s]+at)?[,\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?(?:\s*([A-Za-z0-9_+-]+))?/i;
 
   const match = text.match(formattedRegex);
@@ -81,6 +82,10 @@ export function parseResetDatetimeWithSource(
     const seconds = match[6] ? parseInt(match[6], 10) : 0;
     const meridian = match[7] ? match[7].toUpperCase() : null;
     const tz = match[8] ? match[8].toUpperCase() : null;
+
+    if (hours > 23 || minutes > 59 || seconds > 59) {
+      return null;
+    }
 
     if (meridian === 'PM' && hours < 12) {
       hours += 12;
@@ -101,6 +106,82 @@ export function parseResetDatetimeWithSource(
         }
       }
     }
+  }
+
+  // 4. Special word times: "try again at noon", "try again at midnight"
+  const specialMatch = text.match(/\bat\s+(noon|midnight)\b/i);
+  if (specialMatch) {
+    const word = specialMatch[1].toLowerCase();
+    const hours = word === 'noon' ? 12 : 0;
+    const minutes = 0;
+    const candidate = new Date(
+      referenceDate.getFullYear(),
+      referenceDate.getMonth(),
+      referenceDate.getDate(),
+      hours,
+      minutes,
+      0,
+      0
+    );
+
+    if (candidate.getTime() <= referenceDate.getTime()) {
+      candidate.setDate(candidate.getDate() + 1);
+    }
+
+    return {
+      date: candidate,
+      source: 'parsed_clock_time',
+      rawClock: word,
+    };
+  }
+
+  // 5. Clock-only times: "try again at 3:09 PM", "try again at 8:09 PM", "try again at 11:05 AM"
+  const clockRegex = /\bat\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM|am|pm)?/i;
+  const clockMatch = text.match(clockRegex);
+  if (clockMatch) {
+    let hours = parseInt(clockMatch[1], 10);
+    const minutes = parseInt(clockMatch[2], 10);
+    const seconds = clockMatch[3] ? parseInt(clockMatch[3], 10) : 0;
+    const meridian = clockMatch[4] ? clockMatch[4].toUpperCase() : null;
+
+    if (meridian) {
+      if (hours < 1 || hours > 12) return null;
+      if (minutes < 0 || minutes > 59 || seconds < 0 || seconds > 59) return null;
+
+      if (meridian === 'PM' && hours < 12) {
+        hours += 12;
+      } else if (meridian === 'AM' && hours === 12) {
+        hours = 0;
+      }
+    } else {
+      if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59 || seconds < 0 || seconds > 59) {
+        return null;
+      }
+    }
+
+    const rawClock = clockMatch[0].replace(/^at\s+/i, '').trim();
+
+    // Construct in local wall-clock timezone on referenceDate's date
+    const candidate = new Date(
+      referenceDate.getFullYear(),
+      referenceDate.getMonth(),
+      referenceDate.getDate(),
+      hours,
+      minutes,
+      seconds,
+      0
+    );
+
+    // If candidate time has already passed today, advance to tomorrow
+    if (candidate.getTime() <= referenceDate.getTime()) {
+      candidate.setDate(candidate.getDate() + 1);
+    }
+
+    return {
+      date: candidate,
+      source: 'parsed_clock_time',
+      rawClock,
+    };
   }
 
   return null;
