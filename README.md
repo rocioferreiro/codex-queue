@@ -3,20 +3,34 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
 
-**codex-queue** (`cq`) is a local, lightweight task queue CLI for persisting and executing Codex agent tasks sequentially using the installed [Codex CLI](https://github.com/openai/codex).
+**codex-queue** (`cq`) is an availability-aware task queue CLI for persisting Codex tasks locally and executing them automatically when Codex capacity becomes available.
+
+---
+
+## The Primary Use Case
+
+> **Queue tasks now, let them execute when Codex capacity becomes available.**
+
+When you hit your hourly or monthly Codex usage limit, you don't need to manually check back and wait. Simply queue tasks with `cq add` and run `cq worker`. The worker:
+1. Detects usage limits and extracts the exact reset time from Codex output (with an automated 60-second safety buffer).
+2. Sets the job status to `waiting_limit` with `next_attempt_at`.
+3. Automatically resumes and executes tasks in priority order as soon as Codex becomes available again.
 
 ---
 
 ## Features
 
-- ⚡ **Local SQLite Persistence**: Uses `better-sqlite3` with WAL mode to track job state and timestamps.
-- 🔒 **Safe Process Execution**: Executes the Codex CLI using `node:child_process.spawn` with `shell: false` (no shell interpolation).
+- ⚡ **Local SQLite Persistence**: Uses `better-sqlite3` with WAL mode and automatic schema migrations.
+- 🎯 **Priority Queueing**: Supports `high`, `normal`, and `low` priorities (`priority DESC, created_at ASC`).
+- 🤖 **Availability-Aware Worker (`cq worker`)**: Single-concurrency foreground worker that polls SQLite and executes runnable jobs safely.
+- 🔒 **Duplicate Execution Prevention**: Atomic SQLite transactions guarantee two workers will never execute the same job concurrently.
+- 🕒 **Usage Limit Detection & Reset Extraction**: Encapsulated classifier extracts reset timestamps (e.g. `Sep 1st, 2026 5:32 PM`) + 60s safety buffer.
+- 🔁 **Resilient Retry Policies**: Exponential backoff for rate limits and transient 5xx errors; immediate failure on auth or sandbox violations.
+- 🛑 **Job Cancellation (`cq cancel <id>`)**: Cancel pending or waiting jobs safely.
 - 📜 **Streaming JSONL Parser**: Captures output from `codex exec --json --sandbox workspace-write -C <repo>` line by line.
 - 🧵 **Codex Thread Tracking**: Extracts and persists the Codex `thread_id` directly in the database.
 - 🗄 **Raw Log Retention**: Stores unmodified raw JSONL stream logs per job in `~/.codex-queue/logs/job-<id>.jsonl`.
-- 📊 **Status Lifecycle**: Full lifecycle tracking: `pending` ➔ `running` ➔ `completed` / `failed`.
-- 🧩 **Modular Architecture**: Clean separation between CLI, Database, Storage, Parser, and Runner layers.
-- 🧪 **Vitest Test Suite**: Unit and integration tests covering database, parser, runner, and CLI.
+- 📊 **Status Lifecycle**: `pending` ➔ `running` ➔ `waiting_limit` ➔ `completed` / `failed` / `cancelled`.
 
 ---
 
@@ -30,31 +44,20 @@
 
 ## Installation & Setup
 
-Clone the repository and install dependencies:
-
 ```bash
 git clone https://github.com/your-username/codex-queue.git
 cd codex-queue
 pnpm install
-```
-
-### Build
-
-Build the TypeScript distribution files:
-
-```bash
 pnpm build
 ```
 
-### Link CLI globally (Optional)
-
-Link `cq` / `codex-queue` to your local environment:
+Link `cq` / `codex-queue` globally:
 
 ```bash
 pnpm link --global
 ```
 
-Or run directly with `tsx` during development:
+Or run via `tsx` during development:
 
 ```bash
 pnpm dev --help
@@ -64,85 +67,106 @@ pnpm dev --help
 
 ## CLI Usage
 
-### 1. Add a Task to the Queue (`cq add`)
+### 1. Add Tasks (`cq add`)
 
-Queues a new task using the current working directory as the target repository root:
-
-```bash
-cq add "Implement authentication middleware with JWT"
-```
-
-You can also specify a custom repository path:
+Queue tasks with priority (`high`, `normal`, `low`):
 
 ```bash
-cq add "Fix issue with user registration" -C /path/to/project
-```
+# Default normal priority in current working directory
+cq add "Implement user authentication with JWT"
 
-Output:
-```text
-✔ Job #1 created successfully
-  Status:    pending
-  Repo:      /path/to/project
-  Prompt:    Fix issue with user registration
+# High priority task
+cq add "Hotfix critical production memory leak" --priority high
 
-Run this job with: cq run 1
+# Specific repo path and low priority
+cq add "Refactor test helper utilities" -C /path/to/project --priority low
 ```
 
 ---
 
-### 2. List Queued Tasks (`cq list`)
+### 2. Start the Worker (`cq worker`)
 
-View all tasks in the queue:
+Start the continuous queue worker in the foreground:
+
+```bash
+cq worker
+```
+
+**Worker Observability Output:**
+```text
+codex-queue worker started
+[17:31:02] job #12 starting
+[17:31:04] Codex usage limit reached
+[17:31:04] job #12 waiting until 17:42:00
+
+[17:42:01] job #12 retrying (attempt 2)
+[17:48:12] job #12 completed
+```
+
+The worker gracefully handles `SIGINT` (Ctrl+C) and `SIGTERM`, safely aborting or waiting for active Codex child processes before exiting.
+
+---
+
+### 3. List Queued Tasks (`cq list`)
+
+View all tasks, their priorities, attempts, and next retry schedules:
 
 ```bash
 cq list
 ```
 
-Filter by status (`pending`, `running`, `completed`, `failed`):
+Filter by status (`pending`, `running`, `waiting_limit`, `completed`, `failed`, `cancelled`):
 
 ```bash
-cq list --status pending
+cq list --status waiting_limit
 cq list --status completed
 ```
 
-Example Output:
+**Example Output:**
 ```text
-ID     STATUS        THREAD ID         CREATED             PROMPT
-────────────────────────────────────────────────────────────────────────────────
-#1     completed     th_01HJ8Z90K...   Sep 1, 12:30:15 PM  Fix issue with user registration
-#2     pending       -                 Sep 1, 12:32:00 PM  Implement authentication middleware
+ID    PRIORITY  STATUS         ATTEMPTS  NEXT ATTEMPT         THREAD ID      PROMPT
+───────────────────────────────────────────────────────────────────────────────────────────────
+#12   high      waiting_limit  1         Sep 1, 05:42:00 PM   -              Hotfix critical memory leak
+#13   normal    pending        0         -                    -              Implement JWT auth
+#14   low       pending        0         -                    -              Refactor tests
 
-Total: 2 job(s)
+Total: 3 job(s)
 ```
 
 ---
 
-### 3. Run a Task (`cq run <id>`)
+### 4. Execute a Task Immediately (`cq run <id>`)
 
-Executes a job using the Codex CLI (`codex exec --json --sandbox workspace-write -C <repo> <prompt>`):
-
-```bash
-cq run 1
-```
-
-Run with verbose event logs:
+Run a specific job on-demand without starting the worker daemon:
 
 ```bash
-cq run 1 --verbose
+cq run 12
 ```
 
-Output:
-```text
-▶ Starting Job #1
-  Repo:   /path/to/project
-  Prompt: Fix issue with user registration
-────────────────────────────────────────────────────────────
-✔ Captured Codex thread_id: th_01HJ8Z90K7PQ123
-────────────────────────────────────────────────────────────
-✔ Job #1 completed successfully in 14.32s
-  Thread ID: th_01HJ8Z90K7PQ123
-  Log File:  ~/.codex-queue/logs/job-1.jsonl
+---
+
+### 5. Cancel a Task (`cq cancel <id>`)
+
+Cancel any `pending` or `waiting_limit` task:
+
+```bash
+cq cancel 14
 ```
+
+---
+
+## Error Classification & Reset Parsing
+
+`codex exec --json` does not currently expose Codex's internal structured `CodexErrorInfo` consistently.
+
+Therefore, `codex-queue` includes an isolated error classification layer (`src/classifier/`) that:
+1. First inspects structured error fields if present in JSONL events.
+2. Falls back to human-readable error parsing for usage limits, rate limits, authentication errors, and sandbox violations.
+3. Parses natural language reset strings (e.g. `"Try again at Sep 1st, 2026 5:32 PM"` or `"in 15 minutes"`) and converts them into standardized UTC timestamps.
+4. Adds a **60-second safety buffer** past the reset time to prevent edge-case race conditions on the Codex provider.
+
+> [!NOTE]
+> All regex and string matching is strictly encapsulated inside `src/classifier/`. Once `codex exec` provides structured error codes in future versions, the fallback parser can be removed without altering the rest of the application.
 
 ---
 
@@ -152,7 +176,7 @@ By default, data is stored in `~/.codex-queue`:
 
 ```text
 ~/.codex-queue/
-├── codex-queue.db        # SQLite database storing jobs and statuses
+├── codex-queue.db        # SQLite database storing jobs, retries, and statuses
 └── logs/
     ├── job-1.jsonl       # Full raw JSONL events from Codex execution
     └── job-2.jsonl
@@ -169,74 +193,25 @@ By default, data is stored in `~/.codex-queue`:
 
 ---
 
-## Architecture
-
-The project is designed with modularity in mind:
-
-```text
-src/
-├── cli/              # Commander CLI commands (add, list, run) and entry points
-│   ├── commands/     # Command handlers
-│   ├── index.ts      # Command definitions
-│   └── bin.ts        # CLI executable launcher
-├── db/               # SQLite database client, schema, and repository methods
-│   ├── client.ts     # SQLite connection & WAL mode
-│   ├── schema.ts     # Database DDL
-│   └── jobs.ts       # Job CRUD & status management
-├── storage/          # Path resolutions and raw log file handling
-│   ├── paths.ts      # Data directories & environment paths
-│   └── logs.ts       # Per-job write stream & reading
-├── parser/           # Streaming JSONL line parser and event interpreter
-│   ├── jsonl.ts      # Chunk-safe line parser
-│   └── events.ts     # Thread ID & event metadata extractor
-├── runner/           # Process runner wrapping child_process.spawn
-│   ├── codex-runner.ts # Executes `codex exec` with proper isolation
-│   └── types.ts      # Runner interfaces
-├── types/            # Domain interfaces (Job, JobStatus, RunnerResult)
-└── index.ts          # Public library exports
-```
-
----
-
 ## Testing
 
-Run tests with [Vitest](https://vitest.dev/):
+Run the test suite with Vitest:
 
 ```bash
 pnpm test
 ```
 
-Run test suite in watch mode:
+Watch mode for TDD:
 
 ```bash
 pnpm test:watch
 ```
 
-Run TypeScript typecheck:
+Typecheck:
 
 ```bash
 pnpm typecheck
 ```
-
----
-
-## Recommended Next Steps
-
-Based on the roadmap for future milestones:
-
-1. **Auto-Runner / Daemon Mode (`cq start` / `cq worker`)**:
-   - Background worker process that continuously polls for `pending` jobs and executes them sequentially.
-   - PID file management and graceful shutdown (`SIGINT` / `SIGTERM` signal handlers).
-2. **Scheduling & Cron Support (`cq schedule`)**:
-   - Support one-time delay (`--at "14:00"`, `--in "30m"`) and recurring cron syntax.
-3. **Retries & Error Handling Policies**:
-   - Configurable max retries, exponential backoff, and failure thresholds.
-4. **Multiple `CODEX_HOME` / Multi-Account Profiles**:
-   - Assign jobs to specific Codex profiles or API keys (`--account <name>` / `--codex-home <path>`).
-5. **Resume & Fork Previous Threads (`cq resume <id>`)**:
-   - Leverage the captured `thread_id` to resume conversation contexts using `codex exec resume <thread_id>`.
-6. **TUI / Terminal Dashboard**:
-   - Interactive terminal UI (e.g. via `ink` or `blessed`) to monitor running jobs and view live logs.
 
 ---
 
