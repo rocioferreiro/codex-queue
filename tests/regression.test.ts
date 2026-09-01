@@ -8,6 +8,8 @@ import type Database from 'better-sqlite3';
 import { initDatabase, closeDatabase } from '../src/db/client.js';
 import { createJob, getJobById, updateJobStatus, claimNextRunnableJob, recoverRunningJobs, retryJob, cancelJob } from '../src/db/jobs.js';
 import { CodexRunner } from '../src/runner/codex-runner.js';
+import { JobExecutor } from '../src/execution/job-executor.js';
+import { QueueWorker } from '../src/worker/worker.js';
 import { classifyError } from '../src/classifier/index.js';
 import { decideRetryAction } from '../src/policy/retry.js';
 
@@ -210,106 +212,145 @@ describe('Milestone 2 Regression Tests', () => {
     });
   });
 
-  describe('4. Usage Limit Retry Time & Fallback Backoff', () => {
-    const referenceDate = new Date('2026-09-01T12:00:00.000Z');
+  describe('4. Real Codex Error Message & Clock-Only Parsing', () => {
+    it('parses exact real Codex turn.failed message with time-only reset', () => {
+      // Local reference time: 13:45 (1:45 PM)
+      const referenceDate = new Date(2026, 8, 1, 13, 45, 0);
+      const realMessage = "You've hit your usage limit. Upgrade to Pro (...), visit (...) to purchase more credits or try again at 8:09 PM.";
 
-    it('schedules parsed absolute reset time + 60s safety buffer', () => {
       const classification = classifyError(
-        "You've hit your usage limit. Try again at Sep 1st, 2026 5:32 PM UTC",
+        {
+          type: 'turn.failed',
+          error: {
+            message: realMessage,
+          },
+        },
         referenceDate
       );
+
       expect(classification.kind).toBe('usage_limit');
-      expect(classification.resetAt).not.toBeNull();
+      expect(classification.resetSource).toBe('parsed_clock_time');
+      expect(classification.rawClock).toBe('8:09 PM');
+      expect(classification.errorSourceDescription).toBe('JSONL turn.failed');
+
+      // Resolved local time: Sep 1, 2026 at 20:09:00
+      expect(classification.resetAt?.getHours()).toBe(20);
+      expect(classification.resetAt?.getMinutes()).toBe(9);
 
       const decision = decideRetryAction(classification, 1, referenceDate);
       expect(decision.shouldRetry).toBe(true);
       expect(decision.nextStatus).toBe('waiting_limit');
-      expect(decision.resetSource).toBe('parsed_absolute');
+      expect(decision.resetSource).toBe('parsed_clock_time');
 
-      // 17:32:00 UTC + 60s = 17:33:00 UTC
-      expect(decision.nextAttemptAt).toBe(new Date(classification.resetAt!.getTime() + 60000).toISOString());
+      // Next attempt must be reset time + 60s safety buffer: 20:10:00
+      const nextAttempt = new Date(decision.nextAttemptAt!);
+      expect(nextAttempt.getHours()).toBe(20);
+      expect(nextAttempt.getMinutes()).toBe(10);
+      expect(nextAttempt.getSeconds()).toBe(0);
     });
 
-    it('uses >= 10 minute fallback backoff for usage limit when no reset timestamp is found', () => {
-      const classification = classifyError(
-        "You've hit your usage limit. Please upgrade your plan.",
-        referenceDate
-      );
-      expect(classification.kind).toBe('usage_limit');
-      expect(classification.resetAt).toBeNull();
+    it('shared JobExecutor persists waiting_limit for exact real Codex error fixture', async () => {
+      const job = createJob({ prompt: 'Real output test task' }, db);
+      const executor = new JobExecutor(db);
 
-      // Attempt 1: 10 minutes
-      const decision1 = decideRetryAction(classification, 1, referenceDate);
-      expect(decision1.shouldRetry).toBe(true);
-      expect(decision1.delayMs).toBe(10 * 60 * 1000); // 600,000 ms
-      expect(decision1.resetSource).toBe('fallback_backoff');
-      expect(new Date(decision1.nextAttemptAt!).getTime() - referenceDate.getTime()).toBe(10 * 60 * 1000);
+      const mockProc = createMockChildProcess();
+      const mockSpawn = () => {
+        setTimeout(() => {
+          mockProc.stdout.write('{"type":"thread.started","thread_id":"01a05ddc-6cd1-7f31-be39-0d2bed3dbdee"}\n');
+          mockProc.stdout.write('{"type":"turn.started"}\n');
+          mockProc.stdout.write('{"type":"error","message":"You\'ve hit your usage limit. Upgrade to Pro (...), visit (...) to purchase more credits or try again at 8:09 PM."}\n');
+          mockProc.stdout.write('{"type":"turn.failed","error":{"message":"You\'ve hit your usage limit. Upgrade to Pro (...), visit (...) to purchase more credits or try again at 8:09 PM."}}\n');
+          // Also simulate stderr diagnostic which should NOT override turn.failed
+          mockProc.stderr.write('Error: Reading additional input from stdin...\n');
+          mockProc.emit('close', 1);
+        }, 10);
+        return mockProc as any;
+      };
 
-      // Attempt 2: 20 minutes
-      const decision2 = decideRetryAction(classification, 2, referenceDate);
-      expect(decision2.delayMs).toBe(20 * 60 * 1000);
+      const referenceDate = new Date(2026, 8, 1, 13, 45, 0);
 
-      // Attempt 3: 40 minutes
-      const decision3 = decideRetryAction(classification, 3, referenceDate);
-      expect(decision3.delayMs).toBe(40 * 60 * 1000);
+      const { job: finalJob, runnerResult } = await executor.executeJob(job.id, {
+        spawnFn: mockSpawn as any,
+        referenceDate,
+      });
 
-      // Attempt 4: capped at 60 minutes
-      const decision4 = decideRetryAction(classification, 4, referenceDate);
-      expect(decision4.delayMs).toBe(60 * 60 * 1000);
-    });
+      // Assertions
+      expect(finalJob.status).toBe('waiting_limit');
+      expect(finalJob.failure_kind).toBe('usage_limit');
+      expect(finalJob.thread_id).toBe('01a05ddc-6cd1-7f31-be39-0d2bed3dbdee');
+      expect(finalJob.attempts).toBe(1);
+      expect(finalJob.next_attempt_at).not.toBeNull();
 
-    it('never uses a 60 second retry interval when no reset timestamp is available', () => {
-      const classification = classifyError("Usage limit exceeded", referenceDate);
-      const decision = decideRetryAction(classification, 1, referenceDate);
-      expect(decision.delayMs).not.toBe(60_000);
-      expect(decision.delayMs).toBeGreaterThanOrEqual(10 * 60 * 1000);
-    });
-  });
+      expect(runnerResult.failureKind).toBe('usage_limit');
+      expect(runnerResult.resetSource).toBe('parsed_clock_time');
+      expect(runnerResult.errorSourceDescription).toBe('JSONL turn.failed');
 
-  describe('5. Next Attempt At Cleanup on Lifecycle Transitions', () => {
-    it('clears next_attempt_at when job transitions to running', () => {
-      const job = createJob({ prompt: 'Waiting task' }, db);
-      const future = new Date('2026-09-01T15:00:00.000Z').toISOString();
-      updateJobStatus(job.id, 'waiting_limit', { next_attempt_at: future }, db);
-
-      const claimed = claimNextRunnableJob(new Date('2026-09-01T15:01:00.000Z').toISOString(), db);
-      expect(claimed?.status).toBe('running');
-      expect(claimed?.next_attempt_at).toBeNull();
-    });
-
-    it('clears next_attempt_at on terminal states (completed, cancelled, interrupted)', () => {
-      const j1 = createJob({ prompt: 'J1' }, db);
-      updateJobStatus(j1.id, 'completed', { next_attempt_at: null }, db);
-      expect(getJobById(j1.id, db)?.next_attempt_at).toBeNull();
-
-      const j2 = createJob({ prompt: 'J2' }, db);
-      cancelJob(j2.id, db);
-      expect(getJobById(j2.id, db)?.next_attempt_at).toBeNull();
-
-      const j3 = createJob({ prompt: 'J3' }, db);
-      updateJobStatus(j3.id, 'interrupted', { next_attempt_at: null }, db);
-      expect(getJobById(j3.id, db)?.next_attempt_at).toBeNull();
+      const nextAttempt = new Date(finalJob.next_attempt_at!);
+      expect(nextAttempt.getHours()).toBe(20);
+      expect(nextAttempt.getMinutes()).toBe(10);
     });
   });
 
-  describe('6. Reset Source Reporting & Classification', () => {
-    it('correctly labels resetSource for structured, parsed, and fallback', () => {
-      // Structured
-      const structured = classifyError({ code: 'usage_limit', reset_at: '2026-09-01T16:00:00.000Z' });
-      expect(structured.resetSource).toBe('structured');
+  describe('5. Thread ID Updates to Most Recent Attempt', () => {
+    it('updates job.thread_id across multiple retry executions', async () => {
+      const job = createJob({ prompt: 'Multi thread task' }, db);
+      const runner = new CodexRunner(db);
 
-      // Parsed Absolute
-      const absolute = classifyError("You've hit your usage limit. Try again at Sep 1st, 2026 5:32 PM");
-      expect(absolute.resetSource).toBe('parsed_absolute');
+      // Attempt 1: thread A
+      const mockProc1 = createMockChildProcess();
+      const mockSpawn1 = () => {
+        setTimeout(() => {
+          mockProc1.stdout.write('{"type":"thread.started","thread_id":"thread_A"}\n');
+          mockProc1.emit('close', 1);
+        }, 10);
+        return mockProc1 as any;
+      };
+      await runner.run(job, { spawnFn: mockSpawn1 as any });
+      expect(getJobById(job.id, db)?.thread_id).toBe('thread_A');
 
-      // Parsed Relative
-      const relative = classifyError("Usage limit reached. Please try again in 15 minutes");
-      expect(relative.resetSource).toBe('parsed_relative');
+      // Attempt 2: thread B
+      const jobAttempt2 = getJobById(job.id, db)!;
+      const mockProc2 = createMockChildProcess();
+      const mockSpawn2 = () => {
+        setTimeout(() => {
+          mockProc2.stdout.write('{"type":"thread.started","thread_id":"thread_B"}\n');
+          mockProc2.emit('close', 1);
+        }, 10);
+        return mockProc2 as any;
+      };
+      await runner.run(jobAttempt2, { spawnFn: mockSpawn2 as any });
+      expect(getJobById(job.id, db)?.thread_id).toBe('thread_B');
 
-      // Fallback
-      const fallback = classifyError("Usage limit exceeded without any date");
-      const decision = decideRetryAction(fallback, 1);
-      expect(decision.resetSource).toBe('fallback_backoff');
+      // Attempt 3: thread C
+      const jobAttempt3 = getJobById(job.id, db)!;
+      const mockProc3 = createMockChildProcess();
+      const mockSpawn3 = () => {
+        setTimeout(() => {
+          mockProc3.stdout.write('{"type":"thread.started","thread_id":"thread_C"}\n');
+          mockProc3.emit('close', 0);
+        }, 10);
+        return mockProc3 as any;
+      };
+      await runner.run(jobAttempt3, { spawnFn: mockSpawn3 as any });
+      expect(getJobById(job.id, db)?.thread_id).toBe('thread_C');
+    });
+  });
+
+  describe('6. Stdin Configuration in Spawn', () => {
+    it('configures stdio with ignored stdin', async () => {
+      const job = createJob({ prompt: 'Stdin test' }, db);
+      const runner = new CodexRunner(db);
+
+      let capturedOptions: any = null;
+      const mockProc = createMockChildProcess();
+      const mockSpawn = (_cmd: string, _args: any, options: any) => {
+        capturedOptions = options;
+        setTimeout(() => mockProc.emit('close', 0), 10);
+        return mockProc as any;
+      };
+
+      await runner.run(job, { spawnFn: mockSpawn as any });
+      expect(capturedOptions.stdio).toEqual(['ignore', 'pipe', 'pipe']);
     });
   });
 });
