@@ -2,7 +2,7 @@ import pc from 'picocolors';
 import type Database from 'better-sqlite3';
 import { getDatabase } from '../db/client.js';
 import { claimNextRunnableJob, recoverRunningJobs, getJobById } from '../db/jobs.js';
-import { CodexRunner } from '../runner/codex-runner.js';
+import { JobExecutor } from '../execution/job-executor.js';
 import type { JobRunner } from '../runner/types.js';
 import type { WorkerOptions, WorkerStatus } from './types.js';
 
@@ -11,10 +11,25 @@ function formatTime(date: Date = new Date()): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
+function formatDate(isoString: string): string {
+  try {
+    const d = new Date(isoString);
+    return d.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return isoString;
+  }
+}
+
 export class QueueWorker {
   private db: Database.Database;
   private pollIntervalMs: number;
-  private runner: JobRunner;
+  private executor: JobExecutor;
   private onLog: (message: string) => void;
   private verbose: boolean;
   private runnerOptions: WorkerOptions['runnerOptions'];
@@ -30,7 +45,7 @@ export class QueueWorker {
   constructor(db?: Database.Database, options: WorkerOptions = {}) {
     this.db = db || getDatabase();
     this.pollIntervalMs = options.pollIntervalMs ?? 1000;
-    this.runner = options.runner || new CodexRunner(this.db);
+    this.executor = new JobExecutor(this.db, options.runner);
     this.onLog = options.onLog || ((msg) => console.log(msg));
     this.verbose = options.verbose ?? false;
     this.runnerOptions = options.runnerOptions;
@@ -80,9 +95,8 @@ export class QueueWorker {
 
     if (this.activeJobId !== null) {
       this.log(`Stopping worker... aborting active job #${this.activeJobId}`);
-      this.runner.abort(`Execution interrupted because worker received ${signal}`);
+      this.executor.abort(`Execution interrupted because worker received ${signal}`);
 
-      // Wait for the active execution to safely close and update status in database
       if (this.activeExecutionPromise) {
         await this.activeExecutionPromise;
       }
@@ -110,7 +124,6 @@ export class QueueWorker {
     const job = claimNextRunnableJob(nowIso, this.db);
 
     if (!job) {
-      // No runnable jobs at this moment
       return;
     }
 
@@ -127,46 +140,57 @@ export class QueueWorker {
     });
 
     try {
-      const result = await this.runner.run(job, {
+      const { job: finalJob, runnerResult } = await this.executor.executeJob(job.id, {
         ...this.runnerOptions,
-        skipAttemptIncrement: true, // claimNextRunnableJob already incremented attempts
-        onClassifiedError: (kind, message, nextAttemptAt, resetSource, extractedResetTime) => {
-          if (kind === 'usage_limit') {
-            this.log(`[${formatTime()}] ${pc.yellow('Codex usage limit reached')}`);
-
-            if (this.verbose) {
-              this.log(`[${formatTime()}]   ${pc.gray('Usage limit classified from:')} stderr message`);
-              if (extractedResetTime) {
-                this.log(`[${formatTime()}]   ${pc.gray('Reset time extraction:')} ${extractedResetTime} (${resetSource})`);
-                this.log(`[${formatTime()}]   ${pc.gray('Safety buffer:')} +60s`);
-              } else {
-                this.log(`[${formatTime()}]   ${pc.gray('Reset time extraction:')} failed`);
-                this.log(`[${formatTime()}]   ${pc.gray('Retry policy:')} fallback backoff`);
-              }
-            }
-
-            if (nextAttemptAt) {
-              const resetDate = new Date(nextAttemptAt);
-              this.log(`[${formatTime()}] job #${job.id} waiting until ${formatTime(resetDate)}`);
-            } else {
-              this.log(`[${formatTime()}] job #${job.id} waiting for backoff retry`);
-            }
-          } else if (kind === 'rate_limit') {
-            this.log(`[${formatTime()}] ${pc.yellow('Codex rate limit reached; waiting for backoff retry')}`);
-          }
-        },
+        skipAttemptIncrement: true,
       });
 
       this.processedCount++;
 
-      // Inspect latest job status
-      const latestJob = getJobById(job.id, this.db);
-      if (latestJob?.status === 'completed') {
+      if (finalJob.status === 'completed') {
         this.log(`[${formatTime()}] ${pc.green(`job #${job.id} completed`)}`);
-      } else if (latestJob?.status === 'interrupted') {
+      } else if (finalJob.status === 'waiting_limit') {
+        this.log(`[${formatTime()}] ${pc.yellow('Codex usage limit reached')}`);
+
+        if (this.verbose) {
+          if (runnerResult.errorSourceDescription) {
+            this.log(`[${formatTime()}]   ${pc.gray('Failure source:')} ${runnerResult.errorSourceDescription}`);
+          }
+          this.log(`[${formatTime()}]   ${pc.gray('Failure kind:')} usage_limit`);
+
+          if (runnerResult.rawExtractedClock) {
+            this.log(`[${formatTime()}]   ${pc.gray('Reset extraction:')} clock time ${runnerResult.rawExtractedClock}`);
+          } else if (runnerResult.resetSource === 'structured') {
+            this.log(`[${formatTime()}]   ${pc.gray('Reset extraction:')} structured error payload`);
+          } else if (runnerResult.resetSource === 'parsed_absolute') {
+            this.log(`[${formatTime()}]   ${pc.gray('Reset extraction:')} absolute date`);
+          } else if (runnerResult.resetSource === 'parsed_relative') {
+            this.log(`[${formatTime()}]   ${pc.gray('Reset extraction:')} relative duration`);
+          } else {
+            this.log(`[${formatTime()}]   ${pc.gray('Reset extraction:')} failed`);
+          }
+
+          this.log(`[${formatTime()}]   ${pc.gray('Reset source:')} ${runnerResult.resetSource || 'fallback_backoff'}`);
+
+          if (finalJob.next_attempt_at) {
+            const resetBeforeBuffer = new Date(new Date(finalJob.next_attempt_at).getTime() - 60000);
+            if (runnerResult.resetSource !== 'fallback_backoff') {
+              this.log(`[${formatTime()}]   ${pc.gray('Resolved local reset:')} ${formatDate(resetBeforeBuffer.toISOString())}`);
+              this.log(`[${formatTime()}]   ${pc.gray('Safety buffer:')} +60s`);
+            }
+            this.log(`[${formatTime()}]   ${pc.gray('Next attempt:')} ${formatDate(finalJob.next_attempt_at)}`);
+          }
+        }
+
+        if (finalJob.next_attempt_at) {
+          this.log(`[${formatTime()}] job #${job.id} waiting until ${formatTime(new Date(finalJob.next_attempt_at))}`);
+        } else {
+          this.log(`[${formatTime()}] job #${job.id} waiting for backoff retry`);
+        }
+      } else if (finalJob.status === 'interrupted') {
         this.log(`[${formatTime()}] ${pc.yellow(`job #${job.id} interrupted`)}`);
-      } else if (latestJob?.status === 'failed') {
-        this.log(`[${formatTime()}] ${pc.red(`job #${job.id} failed: ${result.errorMessage || 'unknown error'}`)}`);
+      } else if (finalJob.status === 'failed') {
+        this.log(`[${formatTime()}] ${pc.red(`job #${job.id} failed: ${runnerResult.errorMessage || finalJob.last_error || 'unknown error'}`)}`);
       }
     } catch (err) {
       this.log(`[${formatTime()}] ${pc.red(`job #${job.id} execution error: ${err instanceof Error ? err.message : String(err)}`)}`);
