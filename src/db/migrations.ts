@@ -24,13 +24,13 @@ export function runMigrations(db: Database.Database): void {
     colNames.has('failure_kind') &&
     colNames.has('priority');
 
-  // Also check if CHECK constraint allows 'waiting_limit'
+  // Check if CHECK constraint allows 'interrupted' and 'waiting_limit'
   let checkAllowsNewStatuses = false;
   const sqlRow = db.prepare(
     "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'"
   ).get() as { sql?: string } | undefined;
 
-  if (sqlRow?.sql && sqlRow.sql.includes('waiting_limit') && hasNewCols) {
+  if (sqlRow?.sql && sqlRow.sql.includes('interrupted') && sqlRow.sql.includes('waiting_limit') && hasNewCols) {
     checkAllowsNewStatuses = true;
   }
 
@@ -52,7 +52,7 @@ export function runMigrations(db: Database.Database): void {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         prompt TEXT NOT NULL,
         repo_path TEXT NOT NULL,
-        status TEXT NOT NULL CHECK(status IN ('pending', 'running', 'waiting_limit', 'completed', 'failed', 'cancelled')) DEFAULT 'pending',
+        status TEXT NOT NULL CHECK(status IN ('pending', 'running', 'waiting_limit', 'interrupted', 'completed', 'failed', 'cancelled')) DEFAULT 'pending',
         thread_id TEXT,
         log_path TEXT,
         exit_code INTEGER,

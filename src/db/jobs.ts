@@ -157,6 +157,8 @@ export function deleteJob(id: number, db: Database.Database = getDatabase()): bo
  * - status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= now)
  * - status = 'waiting_limit' AND next_attempt_at IS NOT NULL AND next_attempt_at <= now
  * Ordered by priority DESC, created_at ASC.
+ *
+ * Atomically increments attempts and clears next_attempt_at upon claiming.
  */
 export function claimNextRunnableJob(
   nowIso: string = new Date().toISOString(),
@@ -183,7 +185,8 @@ export function claimNextRunnableJob(
       SET
         status = 'running',
         started_at = ?,
-        attempts = attempts + 1
+        attempts = attempts + 1,
+        next_attempt_at = NULL
       WHERE id = ?
     `);
 
@@ -195,7 +198,7 @@ export function claimNextRunnableJob(
 }
 
 /**
- * Cancel a pending or waiting job.
+ * Cancel a pending, waiting, or interrupted job.
  */
 export function cancelJob(
   id: number,
@@ -207,7 +210,7 @@ export function cancelJob(
   }
 
   if (job.status === 'running') {
-    return { success: false, message: `Job #${id} is currently running and cannot be cancelled directly yet.` };
+    return { success: false, message: `Job #${id} is currently running and cannot be cancelled directly.` };
   }
 
   if (job.status === 'completed') {
@@ -218,21 +221,73 @@ export function cancelJob(
     return { success: false, message: `Job #${id} is already cancelled.` };
   }
 
-  updateJobStatus(id, 'cancelled', { completed_at: new Date().toISOString() }, db);
+  updateJobStatus(
+    id,
+    'cancelled',
+    {
+      completed_at: new Date().toISOString(),
+      next_attempt_at: null,
+    },
+    db
+  );
   const updated = getJobById(id, db);
   return { success: true, job: updated! };
 }
 
 /**
- * On worker startup, recover jobs that were left in 'running' state (e.g. from an ungraceful shutdown or crash)
- * by resetting them to 'pending'.
+ * Manually retry an interrupted or failed job by returning it to 'pending'.
+ * Preserves the previous attempts count.
+ */
+export function retryJob(
+  id: number,
+  db: Database.Database = getDatabase()
+): { success: boolean; message?: string; job?: Job } {
+  const job = getJobById(id, db);
+  if (!job) {
+    return { success: false, message: `Job #${id} not found.` };
+  }
+
+  if (job.status !== 'interrupted' && job.status !== 'failed') {
+    return {
+      success: false,
+      message: `Job #${id} has status '${job.status}'. Only 'interrupted' or 'failed' jobs can be retried with 'cq retry'.`,
+    };
+  }
+
+  updateJobStatus(
+    id,
+    'pending',
+    {
+      started_at: null,
+      completed_at: null,
+      next_attempt_at: null,
+      last_error: null,
+      failure_kind: null,
+      exit_code: null,
+      error_message: null,
+    },
+    db
+  );
+
+  const updated = getJobById(id, db);
+  return { success: true, job: updated! };
+}
+
+/**
+ * On worker startup, recover jobs that were left in 'running' state (e.g. from an unclean crash)
+ * by converting them to 'interrupted' (NOT 'pending' - requires manual 'cq retry').
  */
 export function recoverRunningJobs(db: Database.Database = getDatabase()): number {
+  const now = new Date().toISOString();
   const stmt = db.prepare(`
     UPDATE jobs
-    SET status = 'pending', started_at = NULL
+    SET
+      status = 'interrupted',
+      last_error = 'Execution interrupted due to unexpected worker or process crash',
+      completed_at = ?,
+      next_attempt_at = NULL
     WHERE status = 'running'
   `);
-  const result = stmt.run();
+  const result = stmt.run(now);
   return result.changes;
 }

@@ -1,8 +1,17 @@
-export type JobStatus = 'pending' | 'running' | 'waiting_limit' | 'completed' | 'failed' | 'cancelled';
+export type JobStatus =
+  | 'pending'
+  | 'running'
+  | 'waiting_limit'
+  | 'interrupted'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
 
 export type FailureKind = 'usage_limit' | 'rate_limit' | 'temporary' | 'auth' | 'sandbox' | 'unknown';
 
 export type PriorityLevel = 'low' | 'normal' | 'high';
+
+export type ResetSource = 'structured' | 'parsed_absolute' | 'parsed_relative' | 'fallback_backoff';
 
 export const PRIORITY_MAP: Record<PriorityLevel, number> = {
   low: -10,
@@ -67,5 +76,7 @@ export interface RunnerResult {
   logPath: string;
   errorMessage: string | null;
   durationMs: number;
+  status: 'completed' | 'codex_failure' | 'aborted';
   failureKind?: FailureKind | null;
+  resetSource?: ResetSource | null;
 }

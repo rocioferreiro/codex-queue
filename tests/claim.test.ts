@@ -74,7 +74,7 @@ describe('Job Claiming & Priority Ordering', () => {
     expect(worker2Claim).toBeNull();
   });
 
-  it('recovers hanging running jobs on worker crash / restart', () => {
+  it('recovers hanging running jobs on worker crash / restart to interrupted', () => {
     const job = createJob({ prompt: 'Crashed worker job' }, db);
     updateJobStatus(job.id, 'running', { started_at: new Date().toISOString() }, db);
 
@@ -84,7 +84,7 @@ describe('Job Claiming & Priority Ordering', () => {
     expect(recoveredCount).toBe(1);
 
     const recoveredJob = getJobById(job.id, db);
-    expect(recoveredJob?.status).toBe('pending');
-    expect(recoveredJob?.started_at).toBeNull();
+    expect(recoveredJob?.status).toBe('interrupted');
+    expect(recoveredJob?.last_error).toContain('unexpected worker or process crash');
   });
 });
