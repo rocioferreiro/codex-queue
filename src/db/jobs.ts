@@ -1,17 +1,24 @@
 import type Database from 'better-sqlite3';
 import { getDatabase } from './client.js';
 import type { Job, CreateJobInput, JobFilter, JobStatus } from '../types/job.js';
+import { parsePriority } from '../types/job.js';
+
+const ALL_COLUMNS = `
+  id, prompt, repo_path, status, thread_id, log_path, exit_code, error_message,
+  created_at, started_at, completed_at, attempts, next_attempt_at, last_error, failure_kind, priority
+`;
 
 export function createJob(input: CreateJobInput, db: Database.Database = getDatabase()): Job {
   const now = new Date().toISOString();
   const repoPath = input.repo_path || process.cwd();
+  const priority = parsePriority(input.priority);
 
   const stmt = db.prepare(`
-    INSERT INTO jobs (prompt, repo_path, status, created_at)
-    VALUES (?, ?, 'pending', ?)
+    INSERT INTO jobs (prompt, repo_path, status, created_at, priority)
+    VALUES (?, ?, 'pending', ?, ?)
   `);
 
-  const result = stmt.run(input.prompt, repoPath, now);
+  const result = stmt.run(input.prompt, repoPath, now, priority);
   const id = Number(result.lastInsertRowid);
 
   return {
@@ -26,12 +33,17 @@ export function createJob(input: CreateJobInput, db: Database.Database = getData
     created_at: now,
     started_at: null,
     completed_at: null,
+    attempts: 0,
+    next_attempt_at: null,
+    last_error: null,
+    failure_kind: null,
+    priority,
   };
 }
 
 export function getJobById(id: number, db: Database.Database = getDatabase()): Job | null {
   const stmt = db.prepare(`
-    SELECT id, prompt, repo_path, status, thread_id, log_path, exit_code, error_message, created_at, started_at, completed_at
+    SELECT ${ALL_COLUMNS}
     FROM jobs
     WHERE id = ?
   `);
@@ -42,7 +54,7 @@ export function getJobById(id: number, db: Database.Database = getDatabase()): J
 
 export function listJobs(filter: JobFilter = {}, db: Database.Database = getDatabase()): Job[] {
   let query = `
-    SELECT id, prompt, repo_path, status, thread_id, log_path, exit_code, error_message, created_at, started_at, completed_at
+    SELECT ${ALL_COLUMNS}
     FROM jobs
   `;
   const params: unknown[] = [];
@@ -52,7 +64,7 @@ export function listJobs(filter: JobFilter = {}, db: Database.Database = getData
     params.push(filter.status);
   }
 
-  query += ' ORDER BY id ASC';
+  query += ' ORDER BY priority DESC, created_at ASC, id ASC';
 
   if (filter.limit) {
     query += ' LIMIT ?';
@@ -70,7 +82,7 @@ export function listJobs(filter: JobFilter = {}, db: Database.Database = getData
 export function updateJobStatus(
   id: number,
   status: JobStatus,
-  updates: Partial<Pick<Job, 'started_at' | 'completed_at' | 'thread_id' | 'exit_code' | 'error_message' | 'log_path'>> = {},
+  updates: Partial<Pick<Job, 'started_at' | 'completed_at' | 'thread_id' | 'exit_code' | 'error_message' | 'log_path' | 'attempts' | 'next_attempt_at' | 'last_error' | 'failure_kind' | 'priority'>> = {},
   db: Database.Database = getDatabase()
 ): void {
   const setClauses = ['status = ?'];
@@ -100,6 +112,26 @@ export function updateJobStatus(
     setClauses.push('log_path = ?');
     params.push(updates.log_path);
   }
+  if (updates.attempts !== undefined) {
+    setClauses.push('attempts = ?');
+    params.push(updates.attempts);
+  }
+  if (updates.next_attempt_at !== undefined) {
+    setClauses.push('next_attempt_at = ?');
+    params.push(updates.next_attempt_at);
+  }
+  if (updates.last_error !== undefined) {
+    setClauses.push('last_error = ?');
+    params.push(updates.last_error);
+  }
+  if (updates.failure_kind !== undefined) {
+    setClauses.push('failure_kind = ?');
+    params.push(updates.failure_kind);
+  }
+  if (updates.priority !== undefined) {
+    setClauses.push('priority = ?');
+    params.push(updates.priority);
+  }
 
   params.push(id);
   const query = `UPDATE jobs SET ${setClauses.join(', ')} WHERE id = ?`;
@@ -117,4 +149,90 @@ export function updateJobThreadId(
 export function deleteJob(id: number, db: Database.Database = getDatabase()): boolean {
   const result = db.prepare('DELETE FROM jobs WHERE id = ?').run(id);
   return result.changes > 0;
+}
+
+/**
+ * Atomically claim the next runnable job for a worker.
+ * Runnable conditions:
+ * - status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= now)
+ * - status = 'waiting_limit' AND next_attempt_at IS NOT NULL AND next_attempt_at <= now
+ * Ordered by priority DESC, created_at ASC.
+ */
+export function claimNextRunnableJob(
+  nowIso: string = new Date().toISOString(),
+  db: Database.Database = getDatabase()
+): Job | null {
+  const claimTx = db.transaction(() => {
+    const findStmt = db.prepare(`
+      SELECT id FROM jobs
+      WHERE
+        (status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?))
+        OR
+        (status = 'waiting_limit' AND next_attempt_at IS NOT NULL AND next_attempt_at <= ?)
+      ORDER BY priority DESC, created_at ASC, id ASC
+      LIMIT 1
+    `);
+
+    const candidate = findStmt.get(nowIso, nowIso) as { id: number } | undefined;
+    if (!candidate) {
+      return null;
+    }
+
+    const updateStmt = db.prepare(`
+      UPDATE jobs
+      SET
+        status = 'running',
+        started_at = ?,
+        attempts = attempts + 1
+      WHERE id = ?
+    `);
+
+    updateStmt.run(nowIso, candidate.id);
+    return getJobById(candidate.id, db);
+  });
+
+  return claimTx();
+}
+
+/**
+ * Cancel a pending or waiting job.
+ */
+export function cancelJob(
+  id: number,
+  db: Database.Database = getDatabase()
+): { success: boolean; message?: string; job?: Job } {
+  const job = getJobById(id, db);
+  if (!job) {
+    return { success: false, message: `Job #${id} not found.` };
+  }
+
+  if (job.status === 'running') {
+    return { success: false, message: `Job #${id} is currently running and cannot be cancelled directly yet.` };
+  }
+
+  if (job.status === 'completed') {
+    return { success: false, message: `Job #${id} is already completed.` };
+  }
+
+  if (job.status === 'cancelled') {
+    return { success: false, message: `Job #${id} is already cancelled.` };
+  }
+
+  updateJobStatus(id, 'cancelled', { completed_at: new Date().toISOString() }, db);
+  const updated = getJobById(id, db);
+  return { success: true, job: updated! };
+}
+
+/**
+ * On worker startup, recover jobs that were left in 'running' state (e.g. from an ungraceful shutdown or crash)
+ * by resetting them to 'pending'.
+ */
+export function recoverRunningJobs(db: Database.Database = getDatabase()): number {
+  const stmt = db.prepare(`
+    UPDATE jobs
+    SET status = 'pending', started_at = NULL
+    WHERE status = 'running'
+  `);
+  const result = stmt.run();
+  return result.changes;
 }

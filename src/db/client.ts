@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { getDbPath, ensureStorageDirs } from '../storage/paths.js';
-import { SCHEMA_SQL } from './schema.js';
+import { runMigrations } from './migrations.js';
 
 let defaultDb: Database.Database | null = null;
 
@@ -18,8 +18,8 @@ export function initDatabase(dbPath?: string): Database.Database {
   }
   db.pragma('foreign_keys = ON');
 
-  // Initialize schema
-  db.exec(SCHEMA_SQL);
+  // Initialize and migrate schema
+  runMigrations(db);
 
   return db;
 }
