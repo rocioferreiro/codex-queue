@@ -87,7 +87,17 @@ export class CodexRunner implements JobRunner {
     let jsonlError: unknown = null;
     let otherStructuredError: unknown = null;
 
-    const args = ['exec', '--json', '--sandbox', 'workspace-write', '-C', job.repo_path, job.prompt];
+    const imageArgs = (job.image_paths || []).flatMap((imagePath) => ['--image', imagePath]);
+    const args = [
+      'exec',
+      '--json',
+      '--sandbox',
+      'workspace-write',
+      ...imageArgs,
+      '-C',
+      job.repo_path,
+      job.prompt,
+    ];
     const spawnEnv = {
       ...process.env,
       ...options.env,

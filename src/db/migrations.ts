@@ -23,7 +23,8 @@ export function runMigrations(db: Database.Database): void {
     colNames.has('last_error') &&
     colNames.has('failure_kind') &&
     colNames.has('priority') &&
-    colNames.has('codex_home');
+    colNames.has('codex_home') &&
+    colNames.has('image_paths');
 
   // Check if CHECK constraint allows 'interrupted' and 'waiting_limit'
   let checkAllowsNewStatuses = false;
@@ -54,6 +55,7 @@ export function runMigrations(db: Database.Database): void {
         prompt TEXT NOT NULL,
         repo_path TEXT NOT NULL,
         codex_home TEXT,
+        image_paths TEXT NOT NULL DEFAULT '[]',
         status TEXT NOT NULL CHECK(status IN ('pending', 'running', 'waiting_limit', 'interrupted', 'completed', 'failed', 'cancelled')) DEFAULT 'pending',
         thread_id TEXT,
         log_path TEXT,
@@ -79,12 +81,13 @@ export function runMigrations(db: Database.Database): void {
 
     db.exec(`
       INSERT INTO jobs_v2 (
-        id, prompt, repo_path, codex_home, status, thread_id, log_path, exit_code, error_message,
+        id, prompt, repo_path, codex_home, image_paths, status, thread_id, log_path, exit_code, error_message,
         created_at, started_at, completed_at, attempts, next_attempt_at, last_error, failure_kind, priority
       )
       SELECT
         id, prompt, repo_path,
         ${colNames.has('codex_home') ? 'codex_home' : 'NULL'},
+        ${colNames.has('image_paths') ? "COALESCE(image_paths, '[]')" : "'[]'"},
         status, thread_id, log_path, exit_code, error_message,
         created_at, started_at, completed_at,
         ${attemptsExpr},

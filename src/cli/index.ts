@@ -13,7 +13,12 @@ import { showCommand } from './commands/show.js';
 import { logsCommand } from './commands/logs.js';
 import { listAliasesCommand, removeAliasCommand, setAliasCommand } from './commands/alias.js';
 import { doctorCommand } from './commands/doctor.js';
+import { waitCommand } from './commands/wait.js';
 import { readConfig } from '../config/aliases.js';
+
+function collectImages(value: string, previous: string[] = []): string[] {
+  return previous.concat(value);
+}
 
 export function createProgram(): Command {
   const program = new Command();
@@ -29,6 +34,7 @@ export function createProgram(): Command {
     .argument('<prompt>', 'Prompt or instruction for Codex')
     .option('-C, --repo <path>', 'Repository root directory (defaults to current directory)')
     .option('--codex-home <path>', 'Codex home directory/session to use for this task (defaults to CODEX_HOME)')
+    .option('-i, --image <path>', 'Attach an image file; repeat or use comma-separated paths', collectImages, [])
     .option('-p, --priority <level>', 'Task priority: high, normal, or low', 'normal')
     .action(addCommand);
 
@@ -138,6 +144,14 @@ export function createProgram(): Command {
     .command('doctor')
     .description('Check Codex, storage, session aliases, and daemon health')
     .action(doctorCommand);
+
+  program
+    .command('wait')
+    .description('Wait for a job to reach a terminal state')
+    .argument('<id>', 'Job ID to wait for')
+    .option('-i, --interval <ms>', 'Polling interval in milliseconds', '1000')
+    .option('-t, --timeout <ms>', 'Stop waiting after this many milliseconds')
+    .action(waitCommand);
 
   return program;
 }

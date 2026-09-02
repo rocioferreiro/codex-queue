@@ -1,7 +1,6 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { ensureStorageDirs, getBaseDir } from '../storage/paths.js';
+import { ensureStorageDirs, getBaseDir, resolveUserPath } from '../storage/paths.js';
 
 export interface CodexAlias {
   codex_home: string;
@@ -19,8 +18,7 @@ export function resolveCodexHome(value: string | undefined): string | null {
   const configuredHome = value?.trim() || process.env.CODEX_HOME?.trim();
   if (!configuredHome) return null;
 
-  const expandedHome = configuredHome.replace(/^~(?=$|[\\/])/, os.homedir());
-  return path.resolve(expandedHome);
+  return resolveUserPath(configuredHome);
 }
 
 export function validateAliasName(name: string): string {

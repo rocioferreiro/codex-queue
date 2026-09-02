@@ -5,7 +5,7 @@ import { readConfig } from '../../config/aliases.js';
 
 export async function addCommand(
   promptText: string,
-  options: { repo?: string; codexHome?: string; priority?: string; [key: string]: unknown }
+  options: { repo?: string; codexHome?: string; image?: string[]; priority?: string; [key: string]: unknown }
 ): Promise<void> {
   const prompt = promptText?.trim();
   if (!prompt) {
@@ -33,6 +33,7 @@ export async function addCommand(
       prompt,
       repo_path: repoPath,
       codex_home: codexHome,
+      image_paths: options.image,
       priority,
     });
     console.log(pc.green(`✔ Job #${job.id} created successfully`));
@@ -42,6 +43,9 @@ export async function addCommand(
     console.log(`  ${pc.bold('Codex home:')} ${job.codex_home || 'default (inherited)'}`);
     if (selectedAlias) {
       console.log(`  ${pc.bold('Alias:')}      --${selectedAlias}`);
+    }
+    if (job.image_paths.length > 0) {
+      console.log(`  ${pc.bold('Images:')}     ${job.image_paths.length}`);
     }
     console.log(`  ${pc.bold('Prompt:')}    ${job.prompt.length > 80 ? job.prompt.slice(0, 77) + '...' : job.prompt}`);
     console.log(`\nRun this job with: ${pc.cyan(`cq run ${job.id}`)} or start the worker with: ${pc.cyan('cq worker')}`);

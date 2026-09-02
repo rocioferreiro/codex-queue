@@ -3,24 +3,40 @@ import { getDatabase } from './client.js';
 import type { Job, CreateJobInput, JobFilter, JobStatus } from '../types/job.js';
 import { parsePriority } from '../types/job.js';
 import { resolveCodexHome } from '../config/aliases.js';
+import { resolveImagePaths } from '../storage/images.js';
 
 const ALL_COLUMNS = `
-  id, prompt, repo_path, codex_home, status, thread_id, log_path, exit_code, error_message,
+  id, prompt, repo_path, codex_home, image_paths, status, thread_id, log_path, exit_code, error_message,
   created_at, started_at, completed_at, attempts, next_attempt_at, last_error, failure_kind, priority
 `;
+
+function parseImagePaths(value: unknown): string[] {
+  if (typeof value !== 'string') return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) && parsed.every((item) => typeof item === 'string') ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function mapJobRow(row: Omit<Job, 'image_paths'> & { image_paths?: unknown }): Job {
+  return { ...row, image_paths: parseImagePaths(row.image_paths) } as Job;
+}
 
 export function createJob(input: CreateJobInput, db: Database.Database = getDatabase()): Job {
   const now = new Date().toISOString();
   const repoPath = input.repo_path || process.cwd();
   const codexHome = resolveCodexHome(input.codex_home);
+  const imagePaths = resolveImagePaths(input.image_paths);
   const priority = parsePriority(input.priority);
 
   const stmt = db.prepare(`
-    INSERT INTO jobs (prompt, repo_path, codex_home, status, created_at, priority)
-    VALUES (?, ?, ?, 'pending', ?, ?)
+    INSERT INTO jobs (prompt, repo_path, codex_home, image_paths, status, created_at, priority)
+    VALUES (?, ?, ?, ?, 'pending', ?, ?)
   `);
 
-  const result = stmt.run(input.prompt, repoPath, codexHome, now, priority);
+  const result = stmt.run(input.prompt, repoPath, codexHome, JSON.stringify(imagePaths), now, priority);
   const id = Number(result.lastInsertRowid);
 
   return {
@@ -28,6 +44,7 @@ export function createJob(input: CreateJobInput, db: Database.Database = getData
     prompt: input.prompt,
     repo_path: repoPath,
     codex_home: codexHome,
+    image_paths: imagePaths,
     status: 'pending',
     thread_id: null,
     log_path: null,
@@ -51,8 +68,8 @@ export function getJobById(id: number, db: Database.Database = getDatabase()): J
     WHERE id = ?
   `);
 
-  const row = stmt.get(id) as Job | undefined;
-  return row ?? null;
+  const row = stmt.get(id) as (Omit<Job, 'image_paths'> & { image_paths?: unknown }) | undefined;
+  return row ? mapJobRow(row) : null;
 }
 
 export function listJobs(filter: JobFilter = {}, db: Database.Database = getDatabase()): Job[] {
@@ -79,7 +96,7 @@ export function listJobs(filter: JobFilter = {}, db: Database.Database = getData
   }
 
   const stmt = db.prepare(query);
-  return stmt.all(...params) as Job[];
+  return (stmt.all(...params) as Array<Omit<Job, 'image_paths'> & { image_paths?: unknown }>).map(mapJobRow);
 }
 
 export function updateJobStatus(

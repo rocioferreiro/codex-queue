@@ -120,6 +120,40 @@ describe('CodexRunner', () => {
     expect(logs).toContain('th_mock_999');
   });
 
+  it('passes attached images as Codex image arguments', async () => {
+    const imagePath = path.join(tempDir, 'error.png');
+    fs.writeFileSync(imagePath, 'not really an image');
+    const job = createJob({
+      prompt: 'Inspect these screenshots',
+      repo_path: '/my/workspace',
+      image_paths: [imagePath, imagePath],
+    }, db);
+    const mockProc = createMockChildProcess();
+    let spawnedArgs: string[] = [];
+
+    const mockSpawn = (_command: string, args: readonly string[]) => {
+      spawnedArgs = [...args];
+      setTimeout(() => mockProc.emit('close', 0), 10);
+      return mockProc as any;
+    };
+
+    await new CodexRunner(db).run(job, { spawnFn: mockSpawn as any });
+
+    expect(spawnedArgs).toEqual([
+      'exec',
+      '--json',
+      '--sandbox',
+      'workspace-write',
+      '--image',
+      imagePath,
+      '--image',
+      imagePath,
+      '-C',
+      '/my/workspace',
+      'Inspect these screenshots',
+    ]);
+  });
+
   it('transitions to waiting_limit when usage limit is detected', async () => {
     const job = createJob({ prompt: 'Limit test task', repo_path: '/workspace' }, db);
     const mockProc = createMockChildProcess();

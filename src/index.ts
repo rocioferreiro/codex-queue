@@ -8,6 +8,7 @@ export * from './db/migrations.js';
 export * from './db/jobs.js';
 export * from './storage/paths.js';
 export * from './storage/logs.js';
+export * from './storage/images.js';
 export * from './config/aliases.js';
 
 // Classifier & Policy
@@ -24,8 +25,10 @@ export * from './execution/index.js';
 // Daemon & Worker
 export * from './daemon/index.js';
 export * from './worker/index.js';
+export * from './notifications/index.js';
 
 // CLI
 export * from './cli/index.js';
 export * from './cli/exit-codes.js';
 export * from './cli/commands/doctor.js';
+export * from './cli/commands/wait.js';

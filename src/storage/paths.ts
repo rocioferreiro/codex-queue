@@ -30,6 +30,11 @@ export function getWorkerLogPath(): string {
   return path.join(getBaseDir(), 'worker.log');
 }
 
+export function resolveUserPath(value: string): string {
+  const expandedPath = value.trim().replace(/^~(?=$|[\\/])/, os.homedir());
+  return path.resolve(expandedPath);
+}
+
 export function ensureStorageDirs(): void {
   const baseDir = getBaseDir();
   const logsDir = getLogsDir();

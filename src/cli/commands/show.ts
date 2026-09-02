@@ -101,6 +101,13 @@ export async function showCommand(
     console.log(`${pc.bold('Log file:'.padEnd(15))} ${job.log_path}`);
   }
 
+  if (job.image_paths.length > 0) {
+    console.log(`${pc.bold('Images:'.padEnd(15))} ${job.image_paths.length}`);
+    for (const imagePath of job.image_paths) {
+      console.log(`  ${imagePath}`);
+    }
+  }
+
   console.log(`\n${pc.bold('Prompt:')}`);
   console.log(pc.gray('─'.repeat(60)));
   console.log(job.prompt);

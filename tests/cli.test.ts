@@ -56,6 +56,28 @@ describe('CLI Integration', () => {
     expect(jobs[0].status).toBe('pending');
   });
 
+  it('adds verified image attachments via CLI', async () => {
+    const imagePath = path.join(tempDir, 'screen.png');
+    fs.writeFileSync(imagePath, 'not really an image');
+    const program = createProgram();
+    program.exitOverride();
+
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await program.parseAsync([
+      'node',
+      'cq',
+      'add',
+      'Inspect screen',
+      '--image',
+      imagePath,
+      '--image',
+      imagePath,
+    ]);
+
+    expect(listJobs()[0].image_paths).toEqual([imagePath, imagePath]);
+  });
+
   it('cancels a pending job via CLI cancel command', async () => {
     const program = createProgram();
     program.exitOverride();

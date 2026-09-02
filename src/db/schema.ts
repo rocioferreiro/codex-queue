@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   prompt TEXT NOT NULL,
   repo_path TEXT NOT NULL,
   codex_home TEXT,
+  image_paths TEXT NOT NULL DEFAULT '[]',
   status TEXT NOT NULL CHECK(status IN ('pending', 'running', 'waiting_limit', 'interrupted', 'completed', 'failed', 'cancelled')) DEFAULT 'pending',
   thread_id TEXT,
   log_path TEXT,
