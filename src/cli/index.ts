@@ -15,6 +15,7 @@ import { listAliasesCommand, removeAliasCommand, setAliasCommand } from './comma
 import { doctorCommand } from './commands/doctor.js';
 import { waitCommand } from './commands/wait.js';
 import { readConfig } from '../config/aliases.js';
+import { resumeCommand } from './commands/resume.js';
 
 function collectImages(value: string, previous: string[] = []): string[] {
   return previous.concat(value);
@@ -34,6 +35,7 @@ export function createProgram(): Command {
     .argument('<prompt>', 'Prompt or instruction for Codex')
     .option('-C, --repo <path>', 'Repository root directory (defaults to current directory)')
     .option('--codex-home <path>', 'Codex home directory/session to use for this task (defaults to CODEX_HOME)')
+    .option('--session-id <id>', 'Resume this existing Codex session instead of starting a new one')
     .option('-i, --image <path>', 'Attach an image file; repeat or use comma-separated paths', collectImages, [])
     .option('-p, --priority <level>', 'Task priority: high, normal, or low', 'normal')
     .action(addCommand);
@@ -64,10 +66,23 @@ export function createProgram(): Command {
     // Keep diagnostic commands available when the config file is malformed.
   }
 
+  program
+    .command('resume')
+    .description('Schedule a prompt in an existing Codex session')
+    .argument('<session-id>', 'Codex session/thread ID to resume')
+    .argument('[prompt]', 'Prompt to send after resuming (defaults to "Continue where you left off.")')
+    .option('-C, --repo <path>', 'Repository root directory (defaults to current directory)')
+    .option('--codex-home <path>', 'Codex home directory containing the session (defaults to CODEX_HOME)')
+    .option('-i, --image <path>', 'Attach an image file; repeat or use comma-separated paths', collectImages, [])
+    .option('-p, --priority <level>', 'Task priority: high, normal, or low', 'normal')
+    .action(resumeCommand);
+
   for (const aliasName of configuredAliasNames) {
-    program.commands
-      .find((command) => command.name() === 'add')
-      ?.addOption(new Option(`--${aliasName}`, `Use the configured ${aliasName} Codex session`));
+    for (const commandName of ['add', 'resume']) {
+      program.commands
+        .find((command) => command.name() === commandName)
+        ?.addOption(new Option(`--${aliasName}`, `Use the configured ${aliasName} Codex session`));
+    }
   }
 
   program

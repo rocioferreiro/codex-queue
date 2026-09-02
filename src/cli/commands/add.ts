@@ -5,11 +5,17 @@ import { readConfig } from '../../config/aliases.js';
 
 export async function addCommand(
   promptText: string,
-  options: { repo?: string; codexHome?: string; image?: string[]; priority?: string; [key: string]: unknown }
+  options: { repo?: string; codexHome?: string; sessionId?: string; image?: string[]; priority?: string; [key: string]: unknown }
 ): Promise<void> {
   const prompt = promptText?.trim();
   if (!prompt) {
     console.error(pc.red('Error: Prompt cannot be empty.'));
+    process.exitCode = 1;
+    return;
+  }
+
+  if (options.sessionId !== undefined && !options.sessionId.trim()) {
+    console.error(pc.red('Error: Session ID cannot be empty.'));
     process.exitCode = 1;
     return;
   }
@@ -33,6 +39,7 @@ export async function addCommand(
       prompt,
       repo_path: repoPath,
       codex_home: codexHome,
+      session_id: options.sessionId?.trim(),
       image_paths: options.image,
       priority,
     });
@@ -41,6 +48,9 @@ export async function addCommand(
     console.log(`  ${pc.bold('Priority:')}  ${job.priority > 0 ? pc.magenta('high') : job.priority < 0 ? pc.gray('low') : 'normal'}`);
     console.log(`  ${pc.bold('Repo:')}      ${job.repo_path}`);
     console.log(`  ${pc.bold('Codex home:')} ${job.codex_home || 'default (inherited)'}`);
+    if (job.thread_id) {
+      console.log(`  ${pc.bold('Session ID:')} ${job.thread_id}`);
+    }
     if (selectedAlias) {
       console.log(`  ${pc.bold('Alias:')}      --${selectedAlias}`);
     }

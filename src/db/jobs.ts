@@ -28,15 +28,16 @@ export function createJob(input: CreateJobInput, db: Database.Database = getData
   const now = new Date().toISOString();
   const repoPath = input.repo_path || process.cwd();
   const codexHome = resolveCodexHome(input.codex_home);
+  const sessionId = input.session_id?.trim() || null;
   const imagePaths = resolveImagePaths(input.image_paths);
   const priority = parsePriority(input.priority);
 
   const stmt = db.prepare(`
-    INSERT INTO jobs (prompt, repo_path, codex_home, image_paths, status, created_at, priority)
-    VALUES (?, ?, ?, ?, 'pending', ?, ?)
+    INSERT INTO jobs (prompt, repo_path, codex_home, image_paths, status, thread_id, created_at, priority)
+    VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)
   `);
 
-  const result = stmt.run(input.prompt, repoPath, codexHome, JSON.stringify(imagePaths), now, priority);
+  const result = stmt.run(input.prompt, repoPath, codexHome, JSON.stringify(imagePaths), sessionId, now, priority);
   const id = Number(result.lastInsertRowid);
 
   return {
@@ -46,7 +47,7 @@ export function createJob(input: CreateJobInput, db: Database.Database = getData
     codex_home: codexHome,
     image_paths: imagePaths,
     status: 'pending',
-    thread_id: null,
+    thread_id: sessionId,
     log_path: null,
     exit_code: null,
     error_message: null,

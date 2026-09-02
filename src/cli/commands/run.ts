@@ -50,7 +50,7 @@ export async function runCommand(idArg: string, options: { verbose?: boolean }):
     const { job: finalJob, runnerResult } = await executor.executeJob(jobId, {
       verbose: options.verbose,
       onThreadId: (threadId) => {
-        console.log(pc.green(`✔ Captured Codex thread_id: ${pc.bold(threadId)}`));
+        console.log(pc.green(`✔ Captured Codex session ID: ${pc.bold(threadId)}`));
       },
       onEvent: (event) => {
         if (options.verbose) {
@@ -71,7 +71,7 @@ export async function runCommand(idArg: string, options: { verbose?: boolean }):
     if (finalJob.status === 'completed') {
       console.log(pc.green(`✔ Job #${finalJob.id} completed successfully in ${durationSec}s`));
       if (finalJob.thread_id) {
-        console.log(`  ${pc.bold('Thread ID:')} ${finalJob.thread_id}`);
+        console.log(`  ${pc.bold('Session ID:')} ${finalJob.thread_id}`);
       }
       console.log(`  ${pc.bold('Log File:')}  ${finalJob.log_path}`);
     } else if (finalJob.status === 'waiting_limit') {
@@ -86,7 +86,7 @@ export async function runCommand(idArg: string, options: { verbose?: boolean }):
         console.log(pc.yellow(`Job #${finalJob.id} is queued in waiting_limit for backoff retry.`));
       }
       if (finalJob.thread_id) {
-        console.log(`  ${pc.bold('Thread ID:')} ${finalJob.thread_id}`);
+        console.log(`  ${pc.bold('Session ID:')} ${finalJob.thread_id}`);
       }
       console.log(`  ${pc.bold('Log File:')}  ${finalJob.log_path}`);
       process.exitCode = 1;

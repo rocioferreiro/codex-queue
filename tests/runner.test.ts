@@ -6,7 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import type Database from 'better-sqlite3';
 import { initDatabase, closeDatabase } from '../src/db/client.js';
-import { createJob, getJobById } from '../src/db/jobs.js';
+import { createJob, getJobById, updateJobStatus } from '../src/db/jobs.js';
 import { CodexRunner } from '../src/runner/codex-runner.js';
 import { readJobLog } from '../src/storage/logs.js';
 
@@ -151,6 +151,63 @@ describe('CodexRunner', () => {
       '-C',
       '/my/workspace',
       'Inspect these screenshots',
+    ]);
+  });
+
+  it('resumes an existing session instead of creating a new one', async () => {
+    const job = createJob({
+      prompt: 'Review the implementation',
+      session_id: 'session-existing-123',
+      repo_path: '/my/workspace',
+    }, db);
+    const mockProc = createMockChildProcess();
+    let spawnedArgs: string[] = [];
+
+    const mockSpawn = (_command: string, args: readonly string[]) => {
+      spawnedArgs = [...args];
+      setTimeout(() => {
+        mockProc.stdout.write('{"type":"turn.completed","session_id":"session-existing-123"}\n');
+        mockProc.emit('close', 0);
+      }, 10);
+      return mockProc as any;
+    };
+
+    await new CodexRunner(db).run(job, { spawnFn: mockSpawn as any });
+
+    expect(spawnedArgs).toEqual([
+      'exec',
+      'resume',
+      '--json',
+      'session-existing-123',
+      'Review the implementation',
+    ]);
+  });
+
+  it('continues where it left off when retrying after a usage limit', async () => {
+    const job = createJob({ prompt: 'Implement the whole feature', session_id: 'session-limited-123' }, db);
+    updateJobStatus(job.id, 'waiting_limit', {
+      attempts: 1,
+      failure_kind: 'usage_limit',
+      next_attempt_at: null,
+    }, db);
+    const runnableJob = getJobById(job.id, db)!;
+    const mockProc = createMockChildProcess();
+    let spawnedArgs: string[] = [];
+
+    const mockSpawn = (_command: string, args: readonly string[]) => {
+      spawnedArgs = [...args];
+      setTimeout(() => mockProc.emit('close', 0), 10);
+      return mockProc as any;
+    };
+
+    await new CodexRunner(db).run(runnableJob, { spawnFn: mockSpawn as any });
+
+    expect(spawnedArgs).toEqual([
+      'exec',
+      'resume',
+      '--json',
+      'session-limited-123',
+      'Continue where you left off.',
     ]);
   });
 

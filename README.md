@@ -49,6 +49,9 @@ The runner invokes Codex with the equivalent of:
 codex exec --json --sandbox workspace-write -C <repository> <prompt>
 ```
 
+For a job with a session ID, the runner uses `codex exec resume` and sends the
+queued prompt to that existing session.
+
 Image attachments are passed through as Codex `--image` arguments.
 
 Use `CQ_CODEX_BIN` when the executable is not named `codex` or is not on your
@@ -57,6 +60,20 @@ Use `CQ_CODEX_BIN` when the executable is not named `codex` or is not on your
 Each queued task can use a different Codex session by setting its home
 directory. `codex-queue` stores the path on the job and applies it only while
 that job runs.
+
+Jobs can also resume an existing Codex session. Use `--session-id` when adding
+a prompt, or use the dedicated resume command:
+
+```bash
+cq add "Review the changes" --session-id <session-id> --codex-home ~/.codex
+cq resume <session-id>
+cq resume <session-id> "Run the tests and fix any failures"
+```
+
+The `resume` command defaults to `Continue where you left off.`. When a job
+hits a usage limit, its scheduled retry resumes the captured session with the
+same continuation prompt after the reset time, instead of starting a new
+session.
 
 You can also configure named aliases for frequently used sessions:
 
@@ -173,6 +190,7 @@ cq add "Implement feature A"
 cq add "Fix a security vulnerability" --repo /path/to/repo --priority high
 cq add "Use the work session" --codex-home ~/.codex-work
 cq add "Use the work session" --codexwork
+cq add "Continue this existing task" --session-id <session-id>
 cq add "Investigate this screenshot" --image ./error.png
 cq add "Review these designs" --image ./desktop.png --image ./mobile.png
 cq add "Compare these screens" --image ./before.png,./after.png
@@ -185,6 +203,8 @@ cq list --status interrupted --limit 20
 # Inspect a job and execute it immediately.
 cq show 12
 cq run 12
+cq resume <session-id>                 # Queue "Continue where you left off."
+cq resume <session-id> "Run the tests" # Queue a custom continuation prompt
 cq run 12 --verbose
 cq wait 12                 # Wait for completion in scripts or another terminal
 cq wait 12 --timeout 3600000

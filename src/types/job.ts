@@ -25,6 +25,9 @@ export type ErrorSourceType =
   | 'stderr_known'
   | 'stderr_generic';
 
+/** Prompt used when an execution is resumed after a Codex usage limit. */
+export const CONTINUE_WHERE_LEFT_OFF_PROMPT = 'Continue where you left off.';
+
 export const PRIORITY_MAP: Record<PriorityLevel, number> = {
   low: -10,
   normal: 0,
@@ -68,6 +71,8 @@ export interface CreateJobInput {
   repo_path?: string;
   /** Codex home directory to use for this job. Defaults to CODEX_HOME at creation time. */
   codex_home?: string;
+  /** Existing Codex session/thread to resume instead of creating a new session. */
+  session_id?: string;
   /** Image paths to attach to the initial Codex prompt. */
   image_paths?: string[];
   priority?: PriorityLevel | number | string;

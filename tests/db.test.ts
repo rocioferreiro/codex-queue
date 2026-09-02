@@ -37,6 +37,12 @@ describe('Database Layer', () => {
     expect(getJobById(job.id, db)?.codex_home).toBe('/sessions/work');
   });
 
+  it('persists an existing session id for a queued resume', () => {
+    const job = createJob({ prompt: 'Continue the task', session_id: 'session-existing-123' }, db);
+    expect(job.thread_id).toBe('session-existing-123');
+    expect(getJobById(job.id, db)?.thread_id).toBe('session-existing-123');
+  });
+
   it('captures CODEX_HOME when no per-job home is provided', () => {
     const previousCodexHome = process.env.CODEX_HOME;
     process.env.CODEX_HOME = '~/.codex-personal';

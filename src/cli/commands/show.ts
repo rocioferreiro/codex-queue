@@ -94,7 +94,7 @@ export async function showCommand(
   }
 
   if (job.thread_id) {
-    console.log(`${pc.bold('Thread ID:'.padEnd(15))} ${job.thread_id}`);
+    console.log(`${pc.bold('Session ID:'.padEnd(15))} ${job.thread_id}`);
   }
 
   if (job.log_path) {

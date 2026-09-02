@@ -79,7 +79,7 @@ export async function listCommand(options: { status?: string; limit?: string }):
           'STATUS'.padEnd(14),
           'ATTEMPTS'.padEnd(9),
           'NEXT ATTEMPT'.padEnd(20),
-          'THREAD ID'.padEnd(14),
+          'SESSION ID'.padEnd(14),
           'PROMPT',
         ].join(' ')
       )

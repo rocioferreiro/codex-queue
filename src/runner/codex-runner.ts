@@ -10,7 +10,14 @@ import { extractThreadId } from '../parser/events.js';
 import { classifyError } from '../classifier/index.js';
 import { decideRetryAction } from '../policy/index.js';
 import type { RunnerOptions, JobRunner } from './types.js';
-import type { Job, RunnerResult, FailureKind, ResetSource, ErrorSourceType } from '../types/job.js';
+import {
+  CONTINUE_WHERE_LEFT_OFF_PROMPT,
+  type Job,
+  type RunnerResult,
+  type FailureKind,
+  type ResetSource,
+  type ErrorSourceType,
+} from '../types/job.js';
 
 export class CodexRunner implements JobRunner {
   private db: Database.Database;
@@ -88,16 +95,22 @@ export class CodexRunner implements JobRunner {
     let otherStructuredError: unknown = null;
 
     const imageArgs = (job.image_paths || []).flatMap((imagePath) => ['--image', imagePath]);
-    const args = [
-      'exec',
-      '--json',
-      '--sandbox',
-      'workspace-write',
-      ...imageArgs,
-      '-C',
-      job.repo_path,
-      job.prompt,
-    ];
+    const isResume = Boolean(job.thread_id);
+    const prompt = isResume && job.failure_kind === 'usage_limit'
+      ? CONTINUE_WHERE_LEFT_OFF_PROMPT
+      : job.prompt;
+    const args = isResume
+      ? ['exec', 'resume', '--json', ...imageArgs, job.thread_id!, prompt]
+      : [
+          'exec',
+          '--json',
+          '--sandbox',
+          'workspace-write',
+          ...imageArgs,
+          '-C',
+          job.repo_path,
+          job.prompt,
+        ];
     const spawnEnv = {
       ...process.env,
       ...options.env,

@@ -78,6 +78,37 @@ describe('CLI Integration', () => {
     expect(listJobs()[0].image_paths).toEqual([imagePath, imagePath]);
   });
 
+  it('queues a prompt in an existing session via --session-id', async () => {
+    const program = createProgram();
+    program.exitOverride();
+
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await program.parseAsync([
+      'node',
+      'cq',
+      'add',
+      'Continue existing work',
+      '--session-id',
+      'session-123',
+    ]);
+
+    expect(listJobs()[0].thread_id).toBe('session-123');
+  });
+
+  it('queues the default continuation with the resume command', async () => {
+    const program = createProgram();
+    program.exitOverride();
+
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await program.parseAsync(['node', 'cq', 'resume', 'session-456']);
+
+    const job = listJobs()[0];
+    expect(job.thread_id).toBe('session-456');
+    expect(job.prompt).toBe('Continue where you left off.');
+  });
+
   it('cancels a pending job via CLI cancel command', async () => {
     const program = createProgram();
     program.exitOverride();
@@ -137,5 +168,29 @@ describe('CLI Integration', () => {
     const jobs = listJobs();
     expect(jobs).toHaveLength(1);
     expect(jobs[0].codex_home).toBe('/sessions/work');
+  });
+
+  it('allows a resume job to use a named Codex session alias', async () => {
+    const configureProgram = createProgram();
+    configureProgram.exitOverride();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await configureProgram.parseAsync([
+      'node',
+      'cq',
+      'alias',
+      'set',
+      'codexwork',
+      '--codex-home',
+      '/sessions/work',
+    ]);
+
+    const resumeProgram = createProgram();
+    resumeProgram.exitOverride();
+    await resumeProgram.parseAsync(['node', 'cq', 'resume', 'session-789', '--codexwork']);
+
+    const job = listJobs()[0];
+    expect(job.thread_id).toBe('session-789');
+    expect(job.codex_home).toBe('/sessions/work');
   });
 });
