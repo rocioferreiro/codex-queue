@@ -18,19 +18,6 @@ available again.
 > **Project status:** early development (`0.x`). The CLI and storage format may
 > change between releases.
 
-## Roadmap
-
-- [x] Persist and execute Codex jobs sequentially.
-- [x] Detect usage limits and retry after the provider reset window.
-- [x] Resume prompts in an existing Codex session.
-- [ ] Add documented Windows support, including daemon process management,
-  executable resolution, optional desktop notifications, and Windows CI.
-
-Windows support is intentionally a future feature for now. The queue's core
-foreground commands are expected to be close to portable, but the detached
-daemon and native notification integrations still need a Windows-specific
-implementation and testing.
-
 ## Why use it?
 
 Codex usage limits do not need to interrupt a batch of independent tasks.
@@ -388,6 +375,19 @@ normal Codex environment.
 
 Keep the database and logs private: prompts, error messages, thread IDs, and
 execution events may contain project or other sensitive information.
+
+## Roadmap
+
+- [x] Persist and execute Codex jobs sequentially.
+- [x] Detect usage limits and retry after the provider reset window.
+- [x] Resume prompts in an existing Codex session.
+- [ ] Add documented Windows support, including daemon process management,
+  executable resolution, optional desktop notifications, and Windows CI.
+
+Windows support is intentionally a future feature for now. The queue's core
+foreground commands are expected to be close to portable, but the detached
+daemon and native notification integrations still need a Windows-specific
+implementation and testing.
 
 ## Development
 
