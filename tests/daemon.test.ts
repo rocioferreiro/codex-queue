@@ -90,6 +90,33 @@ describe('Daemon Manager & PID Safety', () => {
     const stateContent = JSON.parse(fs.readFileSync(getWorkerStatePath(), 'utf8'));
     expect(stateContent.pid).toBe(4242);
     expect(stateContent.instanceId).toBeDefined();
+    expect(mockSpawn).toHaveBeenCalledWith(
+      process.execPath,
+      ['/usr/local/bin/cq', 'worker'],
+      expect.any(Object)
+    );
+  });
+
+  it('spawns typescript bin with --import tsx', async () => {
+    const manager = new DaemonManager({
+      verifyIdentityFn: async () => true,
+    });
+    const mockChild = new EventEmitter() as any;
+    mockChild.pid = 4243;
+    mockChild.unref = vi.fn();
+
+    const mockSpawn = vi.fn().mockReturnValue(mockChild);
+
+    await manager.start({
+      spawnFn: mockSpawn as any,
+      binPath: '/path/to/src/cli/bin.ts',
+    });
+
+    expect(mockSpawn).toHaveBeenCalledWith(
+      process.execPath,
+      ['--import', 'tsx', '/path/to/src/cli/bin.ts', 'worker'],
+      expect.any(Object)
+    );
   });
 
   it('rejects starting a second daemon if already running', async () => {

@@ -152,7 +152,7 @@ export class DaemonManager {
     const instanceId = crypto.randomUUID();
 
     const spawnArgs = binPath.endsWith('.ts')
-      ? ['--loader', 'tsx', binPath, 'worker']
+      ? ['--import', 'tsx', binPath, 'worker']
       : [binPath, 'worker'];
 
     const child = spawnFn(process.execPath, spawnArgs, {
