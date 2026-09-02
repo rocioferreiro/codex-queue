@@ -1,22 +1,13 @@
 import type Database from 'better-sqlite3';
-import os from 'node:os';
-import path from 'node:path';
 import { getDatabase } from './client.js';
 import type { Job, CreateJobInput, JobFilter, JobStatus } from '../types/job.js';
 import { parsePriority } from '../types/job.js';
+import { resolveCodexHome } from '../config/aliases.js';
 
 const ALL_COLUMNS = `
   id, prompt, repo_path, codex_home, status, thread_id, log_path, exit_code, error_message,
   created_at, started_at, completed_at, attempts, next_attempt_at, last_error, failure_kind, priority
 `;
-
-export function resolveCodexHome(value: string | undefined): string | null {
-  const configuredHome = value?.trim() || process.env.CODEX_HOME?.trim();
-  if (!configuredHome) return null;
-
-  const expandedHome = configuredHome.replace(/^~(?=$|[\\/])/, os.homedir());
-  return path.resolve(expandedHome);
-}
 
 export function createJob(input: CreateJobInput, db: Database.Database = getDatabase()): Job {
   const now = new Date().toISOString();

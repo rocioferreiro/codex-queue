@@ -49,6 +49,7 @@ cq alias set codexwork --codex-home ~/.codex-work
 cq alias set codexsti --codex-home ~/.codex-sti
 cq alias list
 cq alias remove codexsti
+cq doctor
 ```
 
 Alias names become command-line flags, so they must start with a letter and
@@ -144,6 +145,7 @@ retry.
 | `cq alias set <name> --codex-home <path>` | Create or update a named Codex session alias. |
 | `cq alias list` | List configured Codex session aliases. |
 | `cq alias remove <name>` | Remove a named Codex session alias. |
+| `cq doctor` | Check Codex, storage, configured sessions, and daemon health. |
 
 ### Queue and job management
 

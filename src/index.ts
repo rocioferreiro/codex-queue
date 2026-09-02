@@ -28,3 +28,4 @@ export * from './worker/index.js';
 // CLI
 export * from './cli/index.js';
 export * from './cli/exit-codes.js';
+export * from './cli/commands/doctor.js';

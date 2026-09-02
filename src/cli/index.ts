@@ -12,6 +12,7 @@ import { statusCommand } from './commands/status.js';
 import { showCommand } from './commands/show.js';
 import { logsCommand } from './commands/logs.js';
 import { listAliasesCommand, removeAliasCommand, setAliasCommand } from './commands/alias.js';
+import { doctorCommand } from './commands/doctor.js';
 import { readConfig } from '../config/aliases.js';
 
 export function createProgram(): Command {
@@ -50,7 +51,14 @@ export function createProgram(): Command {
 
   // Register configured aliases as dynamic boolean flags, e.g. --codexwork.
   // A new program instance picks up aliases added after the previous one was created.
-  for (const aliasName of Object.keys(readConfig().aliases)) {
+  let configuredAliasNames: string[] = [];
+  try {
+    configuredAliasNames = Object.keys(readConfig().aliases);
+  } catch {
+    // Keep diagnostic commands available when the config file is malformed.
+  }
+
+  for (const aliasName of configuredAliasNames) {
     program.commands
       .find((command) => command.name() === 'add')
       ?.addOption(new Option(`--${aliasName}`, `Use the configured ${aliasName} Codex session`));
@@ -125,6 +133,11 @@ export function createProgram(): Command {
     .command('status')
     .description('Show the status of the background worker daemon and queue metrics')
     .action(statusCommand);
+
+  program
+    .command('doctor')
+    .description('Check Codex, storage, session aliases, and daemon health')
+    .action(doctorCommand);
 
   return program;
 }

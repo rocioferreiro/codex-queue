@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { ensureStorageDirs, getBaseDir } from '../storage/paths.js';
 
@@ -12,6 +13,14 @@ export interface QueueConfig {
 
 export function getConfigPath(): string {
   return process.env.CQ_CONFIG_PATH || path.join(getBaseDir(), 'config.json');
+}
+
+export function resolveCodexHome(value: string | undefined): string | null {
+  const configuredHome = value?.trim() || process.env.CODEX_HOME?.trim();
+  if (!configuredHome) return null;
+
+  const expandedHome = configuredHome.replace(/^~(?=$|[\\/])/, os.homedir());
+  return path.resolve(expandedHome);
 }
 
 export function validateAliasName(name: string): string {
