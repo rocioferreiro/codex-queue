@@ -35,6 +35,23 @@ export interface DaemonManagerOptions {
   verifyIdentityFn?: (pid: number) => Promise<boolean>;
 }
 
+function findPackageRoot(fromDir: string): string {
+  let curr = fromDir;
+  while (curr !== path.dirname(curr)) {
+    const pkgJsonPath = path.join(curr, 'package.json');
+    if (fs.existsSync(pkgJsonPath)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
+        if (pkg.name === 'codex-queue') {
+          return curr;
+        }
+      } catch {}
+    }
+    curr = path.dirname(curr);
+  }
+  return fromDir;
+}
+
 export class DaemonManager {
   private pidPath: string;
   private statePath: string;
@@ -137,7 +154,7 @@ export class DaemonManager {
     let binPath = options.binPath;
     if (!binPath) {
       const currentFile = fileURLToPath(import.meta.url);
-      const pkgRoot = path.resolve(path.dirname(currentFile), '../..');
+      const pkgRoot = findPackageRoot(path.dirname(currentFile));
       const distBin = path.join(pkgRoot, 'dist/bin/cq.js');
       const srcBin = path.join(pkgRoot, 'src/cli/bin.ts');
 
