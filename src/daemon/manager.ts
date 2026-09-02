@@ -172,18 +172,24 @@ export class DaemonManager {
       ? ['--import', 'tsx', binPath, 'worker']
       : [binPath, 'worker'];
 
-    const child = spawnFn(process.execPath, spawnArgs, {
-      detached: true,
-      stdio: ['ignore', logFd, logFd],
-      env: {
-        ...process.env,
-        ...options.env,
-        CQ_DAEMON: '1',
-        CQ_INSTANCE_ID: instanceId,
-      },
-      cwd: options.cwd || process.cwd(),
-      shell: false,
-    });
+    let child;
+    try {
+      child = spawnFn(process.execPath, spawnArgs, {
+        detached: true,
+        stdio: ['ignore', logFd, logFd],
+        env: {
+          ...process.env,
+          ...options.env,
+          CQ_DAEMON: '1',
+          CQ_INSTANCE_ID: instanceId,
+        },
+        cwd: options.cwd || process.cwd(),
+        shell: false,
+      });
+    } catch (err) {
+      fs.closeSync(logFd);
+      throw err;
+    }
 
     const pid = child.pid;
     if (!pid) {
@@ -222,7 +228,18 @@ export class DaemonManager {
     const pid = status.state.pid;
 
     // Send SIGTERM to the verified daemon
-    sendSignal(pid, 'SIGTERM');
+    const signalSent = sendSignal(pid, 'SIGTERM');
+    if (!signalSent) {
+      // The process may have exited between getStatus() and sendSignal().
+      // Preserve state when it is still alive so a later stop can retry rather
+      // than losing the only handle to a running daemon.
+      const stillAlive = isProcessAlive(pid);
+      if (stillAlive) {
+        return { stopped: false, wasRunning: true, wasStale: false };
+      }
+      this.clearState();
+      return { stopped: true, wasRunning: true, wasStale: true };
+    }
 
     // Wait for the process to exit
     const startTime = Date.now();
@@ -234,7 +251,9 @@ export class DaemonManager {
     }
 
     const stillAlive = isProcessAlive(pid);
-    this.clearState();
+    if (!stillAlive) {
+      this.clearState();
+    }
 
     return {
       stopped: !stillAlive,

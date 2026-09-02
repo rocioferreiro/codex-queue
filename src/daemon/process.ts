@@ -3,6 +3,43 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
+export type ProcessCommandExecutor = (
+  command: string,
+  args: string[]
+) => Promise<{ stdout: string | Buffer }>;
+
+function processCommandQuery(pid: number, platform: NodeJS.Platform): { command: string; args: string[] } {
+  if (platform === 'win32') {
+    // PowerShell's CIM query returns the full command line, unlike tasklist,
+    // which only exposes the executable name and cannot protect against PID reuse.
+    return {
+      command: 'powershell.exe',
+      args: [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `$process = Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'; if ($process) { $process.CommandLine }`,
+      ],
+    };
+  }
+
+  // macOS and Linux both provide ps with this portable command-line format.
+  return {
+    command: 'ps',
+    args: ['-p', String(pid), '-o', 'command='],
+  };
+}
+
+function isCodexQueueWorkerCommand(commandLine: string): boolean {
+  const command = commandLine.trim().toLowerCase();
+  const hasQueueCommand =
+    command.includes('codex-queue') ||
+    command.includes('bin/cq') ||
+    /(?:^|[\\/\s])cq(?:\.js)?(?:$|[\\/\s])/.test(command);
+  const hasWorkerCommand = /(?:^|[\\/\s])worker(?:$|[\\/\s])/.test(command);
+  return hasQueueCommand && hasWorkerCommand;
+}
+
 /**
  * Checks if a process with the given PID is currently alive.
  */
@@ -27,27 +64,19 @@ export function isProcessAlive(pid: number): boolean {
  */
 export async function verifyProcessIdentity(
   pid: number,
-  customExec?: typeof execFileAsync
+  customExec?: ProcessCommandExecutor,
+  platform: NodeJS.Platform = process.platform
 ): Promise<boolean> {
   if (!isProcessAlive(pid)) {
     return false;
   }
 
-  const runner = customExec || execFileAsync;
+  const runner: ProcessCommandExecutor = customExec || (execFileAsync as ProcessCommandExecutor);
 
   try {
-    // ps -p <pid> -o command= returns the command line on macOS / Linux
-    const { stdout } = await runner('ps', ['-p', String(pid), '-o', 'command=']);
-    const cmd = stdout.trim().toLowerCase();
-
-    // Check if the command line references codex-queue, cq, or worker
-    const isMatched =
-      cmd.includes('codex-queue') ||
-      cmd.includes('cq') ||
-      cmd.includes('bin/cq') ||
-      cmd.includes('worker');
-
-    return isMatched;
+    const query = processCommandQuery(pid, platform);
+    const { stdout } = await runner(query.command, query.args);
+    return isCodexQueueWorkerCommand(String(stdout));
   } catch {
     // If ps fails (e.g. process exited between check, or permission denied), treat as unverified
     return false;
