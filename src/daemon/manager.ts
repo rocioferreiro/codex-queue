@@ -79,7 +79,7 @@ export class DaemonManager {
             pid,
             instanceId: 'legacy',
             startedAt: new Date().toISOString(),
-            version: '0.3.0',
+            version: '0.4.0',
             cwd: process.cwd(),
             logPath: this.logPath,
           };
@@ -198,7 +198,7 @@ export class DaemonManager {
       pid,
       instanceId,
       startedAt: new Date().toISOString(),
-      version: '0.3.0',
+      version: '0.4.0',
       cwd: options.cwd || process.cwd(),
       logPath: this.logPath,
     };

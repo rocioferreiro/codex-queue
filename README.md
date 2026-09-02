@@ -10,6 +10,19 @@ worker execute jobs sequentially when Codex is available again.
 > **Project status:** early development (`0.x`). The CLI and storage format may
 > change between releases.
 
+## Roadmap
+
+- [x] Persist and execute Codex jobs sequentially.
+- [x] Detect usage limits and retry after the provider reset window.
+- [x] Resume prompts in an existing Codex session.
+- [ ] Add documented Windows support, including daemon process management,
+  executable resolution, optional desktop notifications, and Windows CI.
+
+Windows support is intentionally a future feature for now. The queue's core
+foreground commands are expected to be close to portable, but the detached
+daemon and native notification integrations still need a Windows-specific
+implementation and testing.
+
 ## Why use it?
 
 Codex usage limits do not need to interrupt a batch of independent tasks.
@@ -38,7 +51,7 @@ are platform integrations, not a requirement for running the queue:
 | macOS | Supported | Native Notification Center via `osascript` (title, subtitle, and sound) |
 | Linux with a desktop session | Supported | `notify-send` when `libnotify` is installed |
 | Headless Linux/server | Supported | Not available without a notification daemon; queue execution still works |
-| Windows | Not currently documented or tested | Not supported by the built-in adapter |
+| Windows | Planned; not currently documented or tested | Planned; not supported by the built-in adapter |
 
 On Debian or Ubuntu, install Linux notifications with `sudo apt install
 libnotify-bin`. Run `cq doctor` to check availability on the current machine.
@@ -89,7 +102,12 @@ cq doctor
 Alias names become command-line flags, so they must start with a letter and
 contain only letters and numbers.
 
-## Install from source
+## Installation
+
+The project is currently installed from source; an npm package release is not
+available yet.
+
+### From source
 
 ```bash
 git clone https://github.com/rocioferreiro/codex-queue.git
@@ -104,15 +122,20 @@ After building, run the CLI from the checkout with:
 node dist/bin/cq.js --help
 ```
 
-To make `cq` and `codex-queue` available as global commands during local
-development, link the package after building:
+For a quick health check:
 
 ```bash
-pnpm link --global
-cq --help
+node dist/bin/cq.js doctor
 ```
 
-Alternatively, invoke the binary through `node dist/bin/cq.js`.
+For development without building, use:
+
+```bash
+pnpm dev -- --help
+```
+
+The published release will add a global package-installation command once the
+package is available through npm.
 
 ## Quick start
 

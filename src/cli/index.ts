@@ -27,7 +27,7 @@ export function createProgram(): Command {
   program
     .name('cq')
     .description('Local availability-aware task queue for Codex CLI')
-    .version('0.3.0');
+    .version('0.4.0');
 
   program
     .command('add')

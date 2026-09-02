@@ -1,7 +1,7 @@
 {
   "name": "codex-queue",
-  "version": "0.1.0",
-  "description": "Persist Codex tasks locally and execute them sequentially with Codex CLI",
+  "version": "0.4.0",
+  "description": "Persistent, availability-aware task queue for the Codex CLI with usage-limit retries and session resume",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
