@@ -59,6 +59,31 @@ describe('Daemon Manager & PID Safety', () => {
       // PID 200 is an unrelated chrome process
       const isVerifiedChrome = await verifyProcessIdentity(200, mockExec as any);
       expect(isVerifiedChrome).toBe(false);
+
+      const unrelatedWorker = vi.fn().mockResolvedValue({ stdout: 'node unrelated-worker.js\n' });
+      expect(await verifyProcessIdentity(300, unrelatedWorker as any)).toBe(false);
+    } finally {
+      process.kill = originalKill;
+    }
+  });
+
+  it('uses PowerShell CIM on Windows to verify the full worker command line', async () => {
+    const mockExec = vi.fn().mockResolvedValue({
+      stdout: 'node.exe C:\\Users\\rocio\\codex-queue\\dist\\bin\\cq.js worker\r\n',
+    });
+    const originalKill = process.kill;
+    (process as any).kill = vi.fn().mockImplementation((pid: number, signal?: number | string) => {
+      if (signal === 0 && pid === 400) return true;
+      return (originalKill as any)(pid, signal);
+    });
+
+    try {
+      expect(await verifyProcessIdentity(400, mockExec as any, 'win32')).toBe(true);
+      expect(mockExec).toHaveBeenCalledWith(
+        'powershell.exe',
+        expect.arrayContaining(['-NoProfile', '-NonInteractive', '-Command'])
+      );
+      expect(mockExec.mock.calls[0][1][3]).toContain('ProcessId = 400');
     } finally {
       process.kill = originalKill;
     }
@@ -202,6 +227,41 @@ describe('Daemon Manager & PID Safety', () => {
       expect(stopResult.stopped).toBe(true);
       expect(stopResult.wasRunning).toBe(true);
       expect(fs.existsSync(getWorkerPidPath())).toBe(false);
+    } finally {
+      process.kill = originalKill;
+    }
+  });
+
+  it('keeps daemon state when a live process cannot be terminated', async () => {
+    const manager = new DaemonManager({
+      verifyIdentityFn: async () => true,
+    });
+    const originalKill = process.kill;
+    (process as any).kill = vi.fn().mockImplementation((pid: number, signal?: number | string) => {
+      if (pid === 8888 && signal === 0) return true;
+      if (pid === 8888 && signal === 'SIGTERM') {
+        const error = new Error('Operation not permitted');
+        (error as any).code = 'EPERM';
+        throw error;
+      }
+      return (originalKill as any)(pid, signal);
+    });
+
+    try {
+      manager.writeState({
+        pid: 8888,
+        instanceId: 'permission-uuid',
+        startedAt: new Date().toISOString(),
+        version: '0.3.0',
+        cwd: process.cwd(),
+        logPath: getWorkerLogPath(),
+      });
+
+      const stopResult = await manager.stop(50);
+      expect(stopResult.stopped).toBe(false);
+      expect(stopResult.wasRunning).toBe(true);
+      expect(fs.existsSync(getWorkerPidPath())).toBe(true);
+      expect(fs.existsSync(getWorkerStatePath())).toBe(true);
     } finally {
       process.kill = originalKill;
     }
