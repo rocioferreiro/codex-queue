@@ -1,7 +1,7 @@
 {
   "name": "codex-queue",
   "version": "0.4.0",
-  "description": "Persistent, availability-aware task queue for the Codex CLI with usage-limit retries and session resume",
+  "description": "Persistent local queue for Codex CLI prompts with usage-limit reset retries, background execution, and session resume",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -36,11 +36,22 @@
   },
   "keywords": [
     "codex",
+    "codex-cli",
+    "openai-codex",
     "queue",
     "cli",
+    "codex-messages",
+    "prompt-queue",
+    "prompt-scheduling",
     "task-queue",
-    "ai",
-    "automation"
+    "usage-limits",
+    "usage-limit-retry",
+    "background-worker",
+    "coding-agent",
+    "session-resume",
+    "automation",
+    "typescript",
+    "sqlite"
   ],
   "author": "Rocio Ferreiro",
   "license": "Apache-2.0",
