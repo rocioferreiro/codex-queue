@@ -34,6 +34,8 @@ The runner invokes Codex with the equivalent of:
 codex exec --json --sandbox workspace-write -C <repository> <prompt>
 ```
 
+Image attachments are passed through as Codex `--image` arguments.
+
 Use `CQ_CODEX_BIN` when the executable is not named `codex` or is not on your
 `PATH`.
 
@@ -133,6 +135,7 @@ help text.
 | `cq restart` | Stop and start the background worker. |
 | `cq status` | Show daemon health, PID, queue counts, and the next scheduled attempt. |
 | `cq worker` | Run the worker in the foreground. Supports `--interval <ms>` and `--verbose`. |
+| `cq wait <id>` | Wait until a job completes, fails, is interrupted, or is cancelled. |
 
 The worker processes one job at a time. If the process exits unexpectedly, jobs
 left in `running` state are recovered as `interrupted` and require an explicit
@@ -155,6 +158,9 @@ cq add "Implement feature A"
 cq add "Fix a security vulnerability" --repo /path/to/repo --priority high
 cq add "Use the work session" --codex-home ~/.codex-work
 cq add "Use the work session" --codexwork
+cq add "Investigate this screenshot" --image ./error.png
+cq add "Review these designs" --image ./desktop.png --image ./mobile.png
+cq add "Compare these screens" --image ./before.png,./after.png
 
 # List jobs, optionally filtered and limited.
 cq list
@@ -165,6 +171,8 @@ cq list --status interrupted --limit 20
 cq show 12
 cq run 12
 cq run 12 --verbose
+cq wait 12                 # Wait for completion in scripts or another terminal
+cq wait 12 --timeout 3600000
 
 # Retry or cancel a job.
 cq retry 12     # interrupted or failed -> pending
@@ -174,6 +182,21 @@ cq cancel 12    # pending, waiting_limit, or interrupted -> cancelled
 `cq run <id>` is an immediate execution path. It is useful for one-off work,
 but use the worker for normal queue processing. A running job cannot be
 cancelled directly; stop the worker to interrupt it, then retry it if needed.
+
+`cq wait <id>` polls the local database and exits successfully only when the
+job reaches `completed`. It exits with a failure code for `failed`,
+`interrupted`, `cancelled`, a missing job, or a timeout.
+
+### Images and notifications
+
+Attach one or more local image files to a task with `--image` (or `-i`). The
+flag can be repeated or given a comma-separated list. Paths are resolved and
+validated when the job is added, and must remain available until the worker
+runs the task.
+
+The worker sends a desktop notification when a task completes, fails, is
+interrupted, or enters `waiting_limit`. Set `CQ_NOTIFY=0` to disable desktop
+notifications. Notifications are best effort and never affect the queue.
 
 ### Logs
 
@@ -229,6 +252,7 @@ By default, `codex-queue` creates this directory with owner-only permissions:
 | `CQ_LOGS_DIR` | Directory for job logs | `$CQ_HOME/logs` |
 | `CQ_CONFIG_PATH` | Path to the aliases configuration file | `$CQ_HOME/config.json` |
 | `CQ_CODEX_BIN` | Codex executable path or name | `codex` |
+| `CQ_NOTIFY` | Disable desktop notifications with `0`, `false`, or `never` | enabled |
 
 If `--codex-home` is omitted, `cq add` captures the `CODEX_HOME` value from
 the environment at creation time. If neither is set, the job uses the worker's
