@@ -1,213 +1,277 @@
 # codex-queue (`cq`)
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
 
-**codex-queue** (`cq`) is a local, availability-aware task queue and background worker for the Codex CLI.
+`codex-queue` is a local, persistent task queue and background worker for the
+Codex CLI. Queue work from any repository, close your terminal, and let the
+worker execute jobs sequentially when Codex is available again.
 
-Queue tasks now from any directory, close the terminal, and let `codex-queue` run them automatically in the background as soon as Codex capacity becomes available.
+> **Project status:** early development (`0.x`). The CLI and storage format may
+> change between releases.
 
----
+## Why use it?
 
-## The Primary User Workflow
+Codex usage limits do not need to interrupt a batch of independent tasks.
+`codex-queue` records each task locally, detects usage-limit responses, parses
+reset times when available, and schedules a retry with a 60-second safety
+buffer. It does not bypass provider limits.
+
+Everything managed by `codex-queue` stays on your machine: the SQLite database,
+worker state, and job logs are stored under `~/.codex-queue` by default. The
+Codex CLI itself may still communicate with its configured service.
+
+## Requirements
+
+- Node.js 20 or newer
+- pnpm (for installing and developing from source)
+- The Codex CLI installed, authenticated, and available as `codex` on `PATH`
+- A repository that Codex can access with its configured sandbox and permissions
+
+The runner invokes Codex with the equivalent of:
+
+```text
+codex exec --json --sandbox workspace-write -C <repository> <prompt>
+```
+
+Use `CQ_CODEX_BIN` when the executable is not named `codex` or is not on your
+`PATH`.
+
+Each queued task can use a different Codex session by setting its home
+directory. `codex-queue` stores the path on the job and applies it only while
+that job runs.
+
+You can also configure named aliases for frequently used sessions:
 
 ```bash
-# 1. Start the local background worker daemon
-cq start
+cq alias set codex --codex-home ~/.codex
+cq alias set codexwork --codex-home ~/.codex-work
+cq alias set codexsti --codex-home ~/.codex-sti
+cq alias list
+cq alias remove codexsti
+```
 
-# 2. Queue tasks from different project repositories
+Alias names become command-line flags, so they must start with a letter and
+contain only letters and numbers.
+
+## Install from source
+
+```bash
+git clone https://github.com/rocioferreiro/codex-queue.git
+cd codex-queue
+pnpm install
+pnpm build
+```
+
+After building, run the CLI from the checkout with:
+
+```bash
+node dist/bin/cq.js --help
+```
+
+To make `cq` and `codex-queue` available as global commands during local
+development, link the package after building:
+
+```bash
+pnpm link --global
+cq --help
+```
+
+Alternatively, invoke the binary through `node dist/bin/cq.js`.
+
+## Quick start
+
+Start the detached worker once:
+
+```bash
+node dist/bin/cq.js start
+```
+
+Queue tasks from any directory. The current directory is used as the
+repository unless `--repo` is supplied.
+
+```bash
 cd ~/projects/project-a
-cq add "Implement user authentication with JWT"
+node /path/to/codex-queue/dist/bin/cq.js add \
+  "Implement user authentication with JWT"
 
 cd ~/projects/project-b
-cq add "Hotfix critical production memory leak" --priority high
-
-# 3. Close the terminal or continue working normally
-
-# 4. Check status and queue metrics anytime
-cq status
-
-# 5. Inspect specific jobs and logs
-cq show 1
-cq logs 1
-cq logs worker
-
-# 6. Stop the daemon when desired
-cq stop
+node /path/to/codex-queue/dist/bin/cq.js add \
+  "Hotfix the production memory leak" --priority high \
+  --codex-home ~/.codex-work
 ```
 
----
+Inspect the queue and job output:
 
-## Key Features
-
-- 🕒 **Availability-Aware Scheduling**: Detects Codex usage limits, extracts exact reset times (`"try again at 8:09 PM"` or `"in 15 minutes"`), applies a 60-second safety buffer, and auto-resumes execution.
-- 🔄 **Background Daemon (`cq start` / `cq stop` / `cq status` / `cq restart`)**: Spawns a detached background worker that survives closing your terminal.
-- 🛡 **Safe PID Verification & Stale State Recovery**: Protects against PID reuse by verifying process command identity before sending signals.
-- 🔍 **Job & Log Observability (`cq show` / `cq logs`)**: Full metadata inspection and pretty-printed JSONL event stream logs.
-- ⚡ **Local SQLite Persistence**: Uses `better-sqlite3` with WAL mode and automatic schema migrations.
-- 🎯 **Priority Queueing**: Supports `high`, `normal`, and `low` priorities (`priority DESC, created_at ASC`).
-- 🔒 **Duplicate Execution Prevention**: Atomic SQLite transactions guarantee tasks are never executed twice.
-- 🛑 **Graceful Shutdown & Interrupted State**: On `SIGINT`/`SIGTERM`, active Codex jobs transition safely to `interrupted` without orphaned processes.
-- 🔄 **Manual Retry (`cq retry <id>`)**: Reset `interrupted` or `failed` jobs back to `pending` while preserving attempt history.
-
----
-
-## Important Operational Semantics
-
-- **Local Only**: Everything is stored on your local machine in `~/.codex-queue/`. No external cloud or background telemetry.
-- **Sleep & Power**: If your computer is asleep or powered off, tasks will not run. When your machine wakes up or the worker is started, any missed or pending tasks immediately become runnable in priority order.
-- **Provider Limits**: `codex-queue` does not attempt to bypass provider usage limits; it schedules work strictly when capacity is restored.
-
----
-
-## CLI Reference
-
-### Daemon Management
-
-| Command | Description | Exit Code |
-| :--- | :--- | :--- |
-| `cq start` | Starts the background worker daemon. | `0` on success, `3` if already running. |
-| `cq stop` | Gracefully stops the verified background daemon. | `0` on success, `4` if not running. |
-| `cq restart` | Restarts the background worker daemon. | `0` on success. |
-| `cq status` | Displays daemon health, PID, and live queue metrics. | `0` on success. |
-
-**Example `cq status` output:**
-```text
-codex-queue is running
-
-PID:                  12345
-Started:              Sep 1, 2026, 06:45 PM
-Log:                  ~/.codex-queue/worker.log
-Current job:          #12
-Pending:              3
-Waiting for capacity: 1
-Interrupted:          0
-Failed:               0
-Next attempt:         Sep 1, 2026, 08:10 PM
-CQ_HOME:              ~/.codex-queue
-```
-
----
-
-### Task Management & Queueing
-
-#### 1. Add Tasks (`cq add`)
 ```bash
-# Normal priority in current directory
+node /path/to/codex-queue/dist/bin/cq.js status
+node /path/to/codex-queue/dist/bin/cq.js list
+node /path/to/codex-queue/dist/bin/cq.js show 1
+node /path/to/codex-queue/dist/bin/cq.js logs 1
+```
+
+Stop the worker when you no longer need it:
+
+```bash
+node /path/to/codex-queue/dist/bin/cq.js stop
+```
+
+For the examples below, `cq` is shorthand for the built command shown above.
+
+## CLI reference
+
+Run `cq --help` or `cq <command> --help` for the installed command's complete
+help text.
+
+### Worker and daemon management
+
+| Command | Description |
+| --- | --- |
+| `cq start` | Start the detached background worker. |
+| `cq stop` | Gracefully stop the background worker. An active job becomes `interrupted`. |
+| `cq restart` | Stop and start the background worker. |
+| `cq status` | Show daemon health, PID, queue counts, and the next scheduled attempt. |
+| `cq worker` | Run the worker in the foreground. Supports `--interval <ms>` and `--verbose`. |
+
+The worker processes one job at a time. If the process exits unexpectedly, jobs
+left in `running` state are recovered as `interrupted` and require an explicit
+retry.
+
+### Session aliases
+
+| Command | Description |
+| --- | --- |
+| `cq alias set <name> --codex-home <path>` | Create or update a named Codex session alias. |
+| `cq alias list` | List configured Codex session aliases. |
+| `cq alias remove <name>` | Remove a named Codex session alias. |
+
+### Queue and job management
+
+```bash
+# Add a task; priority is high, normal, or low.
 cq add "Implement feature A"
+cq add "Fix a security vulnerability" --repo /path/to/repo --priority high
+cq add "Use the work session" --codex-home ~/.codex-work
+cq add "Use the work session" --codexwork
 
-# High priority in specific repository
-cq add "Fix security vulnerability" -C /path/to/repo --priority high
-```
-
-#### 2. List Tasks (`cq list`)
-```bash
+# List jobs, optionally filtered and limited.
 cq list
 cq list --status waiting_limit
-cq list --status interrupted
-```
+cq list --status interrupted --limit 20
 
-#### 3. Inspect a Job (`cq show <id>`)
-```bash
+# Inspect a job and execute it immediately.
 cq show 12
+cq run 12
+cq run 12 --verbose
+
+# Retry or cancel a job.
+cq retry 12     # interrupted or failed -> pending
+cq cancel 12    # pending, waiting_limit, or interrupted -> cancelled
 ```
 
-**Example output:**
-```text
-Job #12
+`cq run <id>` is an immediate execution path. It is useful for one-off work,
+but use the worker for normal queue processing. A running job cannot be
+cancelled directly; stop the worker to interrupt it, then retry it if needed.
 
-Status:         waiting_limit
-Priority:       high
-Attempts:       1
-Repo:           /Users/user/projects/api
-Created:        Sep 1, 2026, 06:30 PM
-Started:        Sep 1, 2026, 06:31 PM
-Completed:      -
-Next attempt:   Sep 1, 2026, 08:10 PM
-Failure kind:   usage_limit
-Last error:     You've hit your usage limit. Try again at 8:09 PM.
-Thread ID:      01a05ddc-6cd1-7f31-be39-0d2bed3dbdee
-Log file:       ~/.codex-queue/logs/job-12.jsonl
+### Logs
 
-Prompt:
-────────────────────────────────────────────────────────────
-Implement feature A
-────────────────────────────────────────────────────────────
-```
+Job logs are stored as JSONL event streams. The worker log is plain text.
 
-#### 4. View Logs (`cq logs`)
 ```bash
-# Pretty-print events for a specific job
-cq logs 12
-
-# Stream raw JSONL events
-cq logs 12 --raw
-
-# Follow job logs in real time
-cq logs 12 --follow
-
-# View background worker log
-cq logs worker
+cq logs 12             # Human-readable job events
+cq logs 12 --raw       # Raw JSONL
+cq logs 12 --follow    # Follow a job log
+cq logs worker         # Background worker log
 cq logs worker --follow
 ```
 
-#### 5. Execute On-Demand (`cq run <id>`)
-```bash
-cq run 12
-```
+## Scheduling and job states
 
-#### 6. Retry or Cancel Tasks
-```bash
-cq retry 12    # Reset interrupted or failed job to pending
-cq cancel 12   # Cancel a pending or waiting task
-```
+Jobs are ordered by priority (`high`, then `normal`, then `low`) and then by
+creation time. A worker claims the next runnable job in an atomic SQLite
+transaction, so multiple workers do not claim the same queued job. The
+foreground `cq run` command is an explicit immediate execution request and
+should not be used concurrently with a worker for the same job.
 
----
+Jobs can have these states:
 
-## Storage & Configuration
+| State | Meaning |
+| --- | --- |
+| `pending` | Ready to be claimed, or waiting for a manual retry. |
+| `running` | Currently being executed by Codex. |
+| `waiting_limit` | Paused until the detected reset time or a retry backoff. |
+| `interrupted` | Stopped by shutdown or an unexpected worker exit. |
+| `completed` | Codex exited successfully. |
+| `failed` | Execution stopped after a non-retryable error or the maximum attempts. |
+| `cancelled` | Cancelled before execution or while waiting. |
 
-By default, data is stored in `~/.codex-queue`:
+## Configuration and storage
+
+By default, `codex-queue` creates this directory with owner-only permissions:
 
 ```text
 ~/.codex-queue/
 ├── codex-queue.db        # SQLite database (WAL mode)
-├── worker.pid            # Active daemon PID
-├── worker-state.json     # Daemon metadata & instance token
-├── worker.log            # Background worker event log
+├── worker.pid            # Background worker PID
+├── worker-state.json     # Daemon metadata and instance token
+├── worker.log            # Background worker log
 └── logs/
-    ├── job-1.jsonl       # Raw JSONL event stream for Job #1
+    ├── job-1.jsonl       # Raw event stream for Job #1
     └── job-2.jsonl
 ```
 
-### Environment Variables
-
 | Variable | Description | Default |
-| :--- | :--- | :--- |
-| `CQ_HOME` | Base directory for database, PID, and log files | `~/.codex-queue` |
-| `CQ_DB_PATH` | Path to SQLite database file | `$CQ_HOME/codex-queue.db` |
-| `CQ_LOGS_DIR` | Path to directory where job logs are saved | `$CQ_HOME/logs` |
-| `CQ_CODEX_BIN` | Path or name of the `codex` executable | `codex` |
+| --- | --- | --- |
+| `CQ_HOME` | Base directory for the database, state, and logs | `~/.codex-queue` |
+| `CQ_DB_PATH` | SQLite database path | `$CQ_HOME/codex-queue.db` |
+| `CQ_LOGS_DIR` | Directory for job logs | `$CQ_HOME/logs` |
+| `CQ_CONFIG_PATH` | Path to the aliases configuration file | `$CQ_HOME/config.json` |
+| `CQ_CODEX_BIN` | Codex executable path or name | `codex` |
 
----
+If `--codex-home` is omitted, `cq add` captures the `CODEX_HOME` value from
+the environment at creation time. If neither is set, the job uses the worker's
+normal Codex environment.
 
-## Testing
+Keep the database and logs private: prompts, error messages, thread IDs, and
+execution events may contain project or other sensitive information.
+
+## Development
 
 ```bash
-# Run all unit and integration test suites
-pnpm test
-
-# Watch mode for TDD
-pnpm test:watch
-
-# Typecheck
-pnpm typecheck
-
-# Production build
-pnpm build
+pnpm install
+pnpm test             # Run all tests
+pnpm test:watch       # Watch tests during development
+pnpm typecheck        # TypeScript checks
+pnpm build            # Build the CLI and library into dist/
 ```
 
----
+The source is organized by responsibility under `src/` (CLI, worker, daemon,
+database, storage, runner, parser, and retry policy). Tests live in `tests/`.
+
+When changing behavior:
+
+1. Add or update tests for the behavior.
+2. Run `pnpm test`, `pnpm typecheck`, and `pnpm build`.
+3. Keep changes focused and document user-visible CLI or storage changes.
+
+## Contributing
+
+Issues and pull requests are welcome. Before opening a pull request, please
+include a concise description of the problem, the behavior you changed, and
+the verification commands you ran. For larger changes, open an issue first so
+the design can be discussed before implementation.
+
+Please do not include real prompts, credentials, repository contents, or
+private logs in issues, test fixtures, or pull requests. Use sanitized examples
+instead.
+
+For security-sensitive reports, avoid posting exploit details publicly. Open a
+private security report through the repository's GitHub security contact when
+available; otherwise contact the maintainers before opening a public issue.
 
 ## License
 
 Licensed under the [Apache License, Version 2.0](LICENSE).
+
+`codex-queue` is an independent open-source project and is not affiliated with
+or endorsed by OpenAI.
