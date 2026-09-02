@@ -44,7 +44,7 @@ Use `codex-queue` if you:
 - want automatic retries, logs, and notifications.
 
 Use the built-in `codex queue` command if you only need to send a message to one
-existing Codex session. See the [comparison](docs/codex-cli-queue-vs-codex-queue.md)
+existing Codex session. See the [comparison](https://github.com/rocioferreiro/codex-queue/blob/main/docs/codex-cli-queue-vs-codex-queue.md)
 for the difference.
 
 ## Prerequisites
@@ -119,7 +119,7 @@ cq logs <job-id>
 This does not bypass, extend, or redeem a provider limit. It only stores the
 work locally and runs it when the Codex CLI becomes available again.
 
-See the detailed guide: [Queue Codex prompts after a usage limit](docs/queue-after-codex-usage-limit.md).
+See the detailed guide: [Queue Codex prompts after a usage limit](https://github.com/rocioferreiro/codex-queue/blob/main/docs/queue-after-codex-usage-limit.md).
 
 ## Common workflows
 
@@ -129,7 +129,7 @@ See the detailed guide: [Queue Codex prompts after a usage limit](docs/queue-aft
 closed. Queue several tasks, then inspect them later with `cq status`, `cq list`,
 and `cq logs <id>`.
 
-See [Run Codex tasks overnight](docs/run-codex-tasks-overnight.md).
+See [Run Codex tasks overnight](https://github.com/rocioferreiro/codex-queue/blob/main/docs/run-codex-tasks-overnight.md).
 
 ### Resume an existing session
 
@@ -151,7 +151,7 @@ cq alias set codexwork --codex-home ~/.codex-work
 cq add "Use the work session" --codexwork
 ```
 
-Aliases are optional. See [Configuration](docs/configuration.md) for session
+Aliases are optional. See [Configuration](https://github.com/rocioferreiro/codex-queue/blob/main/docs/configuration.md) for session
 homes, environment variables, storage, and platform details.
 
 ### Attach images and receive notifications
@@ -178,7 +178,7 @@ That is useful for one message in one existing session. `codex-queue` is for a
 persistent local task queue with multiple jobs, multiple repositories,
 usage-limit-aware retries, logs, notifications, and session resume.
 
-See the full [Codex CLI queue comparison](docs/codex-cli-queue-vs-codex-queue.md).
+See the full [Codex CLI queue comparison](https://github.com/rocioferreiro/codex-queue/blob/main/docs/codex-cli-queue-vs-codex-queue.md).
 
 ## CLI reference
 
@@ -196,7 +196,7 @@ cq cancel <id>                   # Cancel a pending or waiting job
 cq stop                          # Stop the worker
 ```
 
-See the complete [CLI reference](docs/cli-reference.md), including job states,
+See the complete [CLI reference](https://github.com/rocioferreiro/codex-queue/blob/main/docs/cli-reference.md), including job states,
 images, notifications, logs, aliases, and worker behavior.
 
 ## Platform support
@@ -218,14 +218,14 @@ Run `cq doctor` to check availability on the current machine.
 
 ## Configuration and troubleshooting
 
-See [Configuration](docs/configuration.md) for:
+See [Configuration](https://github.com/rocioferreiro/codex-queue/blob/main/docs/configuration.md) for:
 
 - environment variables such as `CQ_HOME`, `CQ_CODEX_BIN`, and `CQ_NOTIFY`;
 - storage paths and privacy considerations;
 - Codex session aliases and `CODEX_HOME` behavior;
 - platform-specific notification details.
 
-See [Troubleshooting](docs/troubleshooting.md) for common installation,
+See [Troubleshooting](https://github.com/rocioferreiro/codex-queue/blob/main/docs/troubleshooting.md) for common installation,
 worker, usage-limit, session, log, and notification issues.
 
 ## Install from source

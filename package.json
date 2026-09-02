@@ -1,6 +1,6 @@
 {
   "name": "codex-queue",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Persistent local queue for Codex CLI prompts with usage-limit reset retries, background execution, and session resume",
   "type": "module",
   "main": "./dist/index.js",
