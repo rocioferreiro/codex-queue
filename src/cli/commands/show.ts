@@ -76,6 +76,7 @@ export async function showCommand(
   console.log(`${pc.bold('Priority:'.padEnd(15))} ${formatPriority(job.priority)}`);
   console.log(`${pc.bold('Attempts:'.padEnd(15))} ${job.attempts || 0}`);
   console.log(`${pc.bold('Repo:'.padEnd(15))} ${job.repo_path}`);
+  console.log(`${pc.bold('Codex home:'.padEnd(15))} ${job.codex_home || 'default (inherited)'}`);
   console.log(`${pc.bold('Created:'.padEnd(15))} ${formatDate(job.created_at)}`);
   console.log(`${pc.bold('Started:'.padEnd(15))} ${formatDate(job.started_at)}`);
   console.log(`${pc.bold('Completed:'.padEnd(15))} ${formatDate(job.completed_at)}`);

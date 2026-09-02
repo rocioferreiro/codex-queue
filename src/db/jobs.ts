@@ -1,30 +1,42 @@
 import type Database from 'better-sqlite3';
+import os from 'node:os';
+import path from 'node:path';
 import { getDatabase } from './client.js';
 import type { Job, CreateJobInput, JobFilter, JobStatus } from '../types/job.js';
 import { parsePriority } from '../types/job.js';
 
 const ALL_COLUMNS = `
-  id, prompt, repo_path, status, thread_id, log_path, exit_code, error_message,
+  id, prompt, repo_path, codex_home, status, thread_id, log_path, exit_code, error_message,
   created_at, started_at, completed_at, attempts, next_attempt_at, last_error, failure_kind, priority
 `;
+
+export function resolveCodexHome(value: string | undefined): string | null {
+  const configuredHome = value?.trim() || process.env.CODEX_HOME?.trim();
+  if (!configuredHome) return null;
+
+  const expandedHome = configuredHome.replace(/^~(?=$|[\\/])/, os.homedir());
+  return path.resolve(expandedHome);
+}
 
 export function createJob(input: CreateJobInput, db: Database.Database = getDatabase()): Job {
   const now = new Date().toISOString();
   const repoPath = input.repo_path || process.cwd();
+  const codexHome = resolveCodexHome(input.codex_home);
   const priority = parsePriority(input.priority);
 
   const stmt = db.prepare(`
-    INSERT INTO jobs (prompt, repo_path, status, created_at, priority)
-    VALUES (?, ?, 'pending', ?, ?)
+    INSERT INTO jobs (prompt, repo_path, codex_home, status, created_at, priority)
+    VALUES (?, ?, ?, 'pending', ?, ?)
   `);
 
-  const result = stmt.run(input.prompt, repoPath, now, priority);
+  const result = stmt.run(input.prompt, repoPath, codexHome, now, priority);
   const id = Number(result.lastInsertRowid);
 
   return {
     id,
     prompt: input.prompt,
     repo_path: repoPath,
+    codex_home: codexHome,
     status: 'pending',
     thread_id: null,
     log_path: null,

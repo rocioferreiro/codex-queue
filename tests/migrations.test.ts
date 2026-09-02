@@ -46,6 +46,7 @@ describe('Database Migrations', () => {
     expect(row1?.priority).toBe(0);
     expect(row1?.next_attempt_at).toBeNull();
     expect(row1?.failure_kind).toBeNull();
+    expect(row1?.codex_home).toBeNull();
 
     const row2 = getJobById(2, db);
     expect(row2?.status).toBe('completed');

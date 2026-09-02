@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type Database from 'better-sqlite3';
+import os from 'node:os';
+import path from 'node:path';
 import { initDatabase } from '../src/db/client.js';
 import { createJob, getJobById, listJobs, updateJobStatus, updateJobThreadId, deleteJob } from '../src/db/jobs.js';
 
@@ -27,6 +29,25 @@ describe('Database Layer', () => {
   it('creates a pending job with custom repo_path', () => {
     const job = createJob({ prompt: 'Fix bugs', repo_path: '/custom/repo' }, db);
     expect(job.repo_path).toBe('/custom/repo');
+  });
+
+  it('persists a custom codex home for a job', () => {
+    const job = createJob({ prompt: 'Use another session', codex_home: '/sessions/work' }, db);
+    expect(job.codex_home).toBe('/sessions/work');
+    expect(getJobById(job.id, db)?.codex_home).toBe('/sessions/work');
+  });
+
+  it('captures CODEX_HOME when no per-job home is provided', () => {
+    const previousCodexHome = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = '~/.codex-personal';
+
+    try {
+      const job = createJob({ prompt: 'Use the personal session' }, db);
+      expect(job.codex_home).toBe(path.join(os.homedir(), '.codex-personal'));
+    } finally {
+      if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = previousCodexHome;
+    }
   });
 
   it('fetches a job by ID', () => {

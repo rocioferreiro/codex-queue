@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   prompt TEXT NOT NULL,
   repo_path TEXT NOT NULL,
+  codex_home TEXT,
   status TEXT NOT NULL CHECK(status IN ('pending', 'running', 'waiting_limit', 'interrupted', 'completed', 'failed', 'cancelled')) DEFAULT 'pending',
   thread_id TEXT,
   log_path TEXT,

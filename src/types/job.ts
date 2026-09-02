@@ -46,6 +46,7 @@ export interface Job {
   id: number;
   prompt: string;
   repo_path: string;
+  codex_home: string | null;
   status: JobStatus;
   thread_id: string | null;
   log_path: string | null;
@@ -64,6 +65,8 @@ export interface Job {
 export interface CreateJobInput {
   prompt: string;
   repo_path?: string;
+  /** Codex home directory to use for this job. Defaults to CODEX_HOME at creation time. */
+  codex_home?: string;
   priority?: PriorityLevel | number | string;
 }
 

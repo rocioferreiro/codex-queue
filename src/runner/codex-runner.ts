@@ -88,6 +88,11 @@ export class CodexRunner implements JobRunner {
     let otherStructuredError: unknown = null;
 
     const args = ['exec', '--json', '--sandbox', 'workspace-write', '-C', job.repo_path, job.prompt];
+    const spawnEnv = {
+      ...process.env,
+      ...options.env,
+      ...(job.codex_home ? { CODEX_HOME: job.codex_home } : {}),
+    };
 
     const parser = new JsonlParser({
       onEvent: (event) => {
@@ -130,10 +135,7 @@ export class CodexRunner implements JobRunner {
         childProc = spawnFn(codexBin, args, {
           shell: false,
           stdio: ['ignore', 'pipe', 'pipe'],
-          env: {
-            ...process.env,
-            ...options.env,
-          },
+          env: spawnEnv,
         });
         this.activeChild = childProc;
       } catch (err) {

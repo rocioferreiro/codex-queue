@@ -37,12 +37,22 @@ describe('CLI Integration', () => {
 
     vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    await program.parseAsync(['node', 'cq', 'add', 'Build high prio feature', '--priority', 'high']);
+    await program.parseAsync([
+      'node',
+      'cq',
+      'add',
+      'Build high prio feature',
+      '--priority',
+      'high',
+      '--codex-home',
+      '/sessions/work',
+    ]);
 
     const jobs = listJobs();
     expect(jobs).toHaveLength(1);
     expect(jobs[0].prompt).toBe('Build high prio feature');
     expect(jobs[0].priority).toBe(10);
+    expect(jobs[0].codex_home).toBe('/sessions/work');
     expect(jobs[0].status).toBe('pending');
   });
 
@@ -80,5 +90,30 @@ describe('CLI Integration', () => {
     await listProg.parseAsync(['node', 'cq', 'list']);
 
     expect(consoleLogSpy).toHaveBeenCalled();
+  });
+
+  it('configures and uses a named Codex session alias', async () => {
+    const configureProgram = createProgram();
+    configureProgram.exitOverride();
+
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await configureProgram.parseAsync([
+      'node',
+      'cq',
+      'alias',
+      'set',
+      'codexwork',
+      '--codex-home',
+      '/sessions/work',
+    ]);
+
+    const addProgram = createProgram();
+    addProgram.exitOverride();
+    await addProgram.parseAsync(['node', 'cq', 'add', 'Use work session', '--codexwork']);
+
+    const jobs = listJobs();
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].codex_home).toBe('/sessions/work');
   });
 });

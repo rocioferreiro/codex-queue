@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { addCommand } from './commands/add.js';
 import { listCommand } from './commands/list.js';
 import { runCommand } from './commands/run.js';
@@ -11,6 +11,8 @@ import { restartCommand } from './commands/restart.js';
 import { statusCommand } from './commands/status.js';
 import { showCommand } from './commands/show.js';
 import { logsCommand } from './commands/logs.js';
+import { listAliasesCommand, removeAliasCommand, setAliasCommand } from './commands/alias.js';
+import { readConfig } from '../config/aliases.js';
 
 export function createProgram(): Command {
   const program = new Command();
@@ -25,8 +27,34 @@ export function createProgram(): Command {
     .description('Add a new Codex task to the queue')
     .argument('<prompt>', 'Prompt or instruction for Codex')
     .option('-C, --repo <path>', 'Repository root directory (defaults to current directory)')
+    .option('--codex-home <path>', 'Codex home directory/session to use for this task (defaults to CODEX_HOME)')
     .option('-p, --priority <level>', 'Task priority: high, normal, or low', 'normal')
     .action(addCommand);
+
+  const aliasCommand = program.command('alias').description('Configure named Codex sessions for queued tasks');
+  aliasCommand
+    .command('set')
+    .description('Create or update a Codex session alias')
+    .argument('<name>', 'Alias name used as a --<name> flag')
+    .requiredOption('--codex-home <path>', 'Codex home directory for this alias')
+    .action(setAliasCommand);
+  aliasCommand
+    .command('list')
+    .description('List configured Codex session aliases')
+    .action(listAliasesCommand);
+  aliasCommand
+    .command('remove')
+    .description('Remove a Codex session alias')
+    .argument('<name>', 'Alias name to remove')
+    .action(removeAliasCommand);
+
+  // Register configured aliases as dynamic boolean flags, e.g. --codexwork.
+  // A new program instance picks up aliases added after the previous one was created.
+  for (const aliasName of Object.keys(readConfig().aliases)) {
+    program.commands
+      .find((command) => command.name() === 'add')
+      ?.addOption(new Option(`--${aliasName}`, `Use the configured ${aliasName} Codex session`));
+  }
 
   program
     .command('list')

@@ -57,7 +57,11 @@ describe('CodexRunner', () => {
   });
 
   it('spawns codex with shell=false and exact arguments', async () => {
-    const job = createJob({ prompt: 'Implement login', repo_path: '/my/workspace' }, db);
+    const job = createJob({
+      prompt: 'Implement login',
+      repo_path: '/my/workspace',
+      codex_home: '/sessions/work',
+    }, db);
 
     let spawnedCommand = '';
     let spawnedArgs: string[] = [];
@@ -100,6 +104,7 @@ describe('CodexRunner', () => {
       'Implement login',
     ]);
     expect((spawnedOptions as any).shell).toBe(false);
+    expect((spawnedOptions as any).env.CODEX_HOME).toBe('/sessions/work');
 
     expect(result.exitCode).toBe(0);
     expect(result.threadId).toBe('th_mock_999');

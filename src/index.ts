@@ -8,6 +8,7 @@ export * from './db/migrations.js';
 export * from './db/jobs.js';
 export * from './storage/paths.js';
 export * from './storage/logs.js';
+export * from './config/aliases.js';
 
 // Classifier & Policy
 export * from './classifier/index.js';
