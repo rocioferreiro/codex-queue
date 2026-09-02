@@ -16,7 +16,7 @@ describe('desktop notifications', () => {
     expect(notifyJob(7, 'completed', undefined, { platform: 'darwin', spawnFn })).toBe(true);
     expect(spawnFn).toHaveBeenCalledWith(
       'osascript',
-      ['-e', 'display notification "completed" with title "codex-queue · Job #7"'],
+      ['-e', 'display notification "completed" with title "✅ Job #7" subtitle "codex-queue · completed" sound name "Glass"'],
       { detached: true, stdio: 'ignore' }
     );
     expect(child.unref).toHaveBeenCalled();
@@ -29,7 +29,13 @@ describe('desktop notifications', () => {
     expect(notifyJob(3, 'waiting_limit', 'next attempt at 10:00', { platform: 'linux', spawnFn })).toBe(true);
     expect(spawnFn).toHaveBeenCalledWith(
       'notify-send',
-      ['codex-queue · Job #3', 'waiting for Codex usage reset: next attempt at 10:00'],
+      [
+        '--app-name=codex-queue',
+        '--urgency=low',
+        '--icon=appointment-soon',
+        '⏸️ Job #3',
+        'codex-queue · waiting for Codex usage reset\nnext attempt at 10:00',
+      ],
       { detached: true, stdio: 'ignore' }
     );
   });
@@ -40,5 +46,20 @@ describe('desktop notifications', () => {
     }) as any;
 
     expect(notifyJob(1, 'failed', 'Codex failed', { platform: 'linux', spawnFn })).toBe(false);
+  });
+
+  it('reports asynchronous notifier errors to the caller', () => {
+    const child = fakeProcess();
+    const errors: string[] = [];
+    const spawnFn = vi.fn(() => child) as any;
+
+    notifyJob(2, 'completed', undefined, {
+      platform: 'darwin',
+      spawnFn,
+      onError: (error) => errors.push(error.message),
+    });
+    child.emit('error', new Error('permission denied'));
+
+    expect(errors).toEqual(['permission denied']);
   });
 });

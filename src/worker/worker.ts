@@ -59,7 +59,9 @@ export class QueueWorker {
     this.onLog = options.onLog || ((msg) => console.log(msg));
     this.verbose = options.verbose ?? false;
     this.runnerOptions = options.runnerOptions;
-    this.notify = options.notify || ((jobId, status, detail) => notifyJob(jobId, status, detail));
+    this.notify = options.notify || ((jobId, status, detail) => notifyJob(jobId, status, detail, {
+      onError: (error) => this.log(`[${formatTime()}] notification error: ${error.message}`),
+    }));
     this.logFilePath = getWorkerLogPath();
   }
 

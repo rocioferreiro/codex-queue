@@ -83,4 +83,28 @@ describe('Doctor Command', () => {
     expect(output).toContain('Doctor found 1 problem(s).');
     expect(process.exitCode).toBe(1);
   });
+
+  it('checks the native notification command', async () => {
+    const spawnSync = vi.fn().mockReturnValue({
+      status: 0,
+      signal: null,
+      error: undefined,
+      stdout: '',
+      stderr: '',
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await doctorCommand({
+      spawnSync: spawnSync as any,
+      platform: 'darwin',
+      getDaemonStatus: async () => ({ isRunning: false, state: null, isStale: false }),
+    });
+
+    expect(spawnSync).toHaveBeenCalledWith(
+      'osascript',
+      ['-e', 'return 0'],
+      expect.objectContaining({ timeout: 5000 })
+    );
+    expect(logSpy.mock.calls.some((call) => call.join(' ').includes('Notifications:'))).toBe(true);
+  });
 });

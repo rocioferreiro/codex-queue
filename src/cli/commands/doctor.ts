@@ -6,6 +6,7 @@ import { DaemonManager } from '../../daemon/manager.js';
 import type { DaemonStatusResult } from '../../daemon/types.js';
 import { getDbPath, getBaseDir, getLogsDir } from '../../storage/paths.js';
 import { readConfig, resolveCodexHome, getConfigPath } from '../../config/aliases.js';
+import { notificationsEnabled } from '../../notifications/index.js';
 
 type CheckStatus = 'ok' | 'warn' | 'fail';
 
@@ -18,6 +19,11 @@ interface DoctorCheck {
 export interface DoctorDependencies {
   spawnSync?: typeof defaultSpawnSync;
   getDaemonStatus?: () => Promise<DaemonStatusResult>;
+  platform?: NodeJS.Platform;
+}
+
+export interface DoctorOptions {
+  notifyTest?: boolean;
 }
 
 function checkDirectory(label: string, directoryPath: string, missingStatus: CheckStatus = 'warn'): DoctorCheck {
@@ -127,6 +133,57 @@ function checkConfiguredHomes(): DoctorCheck[] {
   return checks;
 }
 
+function checkNotifications(
+  spawnSync: typeof defaultSpawnSync,
+  platform: NodeJS.Platform,
+  notifyTest: boolean
+): DoctorCheck {
+  if (!notificationsEnabled()) {
+    return { label: 'Notifications', status: 'ok', detail: 'disabled by CQ_NOTIFY' };
+  }
+
+  let command: string;
+  let args: string[];
+  if (platform === 'darwin') {
+    command = 'osascript';
+    args = notifyTest
+      ? ['-e', 'display notification "codex-queue doctor test" with title "codex-queue"']
+      : ['-e', 'return 0'];
+  } else if (platform === 'linux') {
+    command = 'notify-send';
+    args = notifyTest ? ['codex-queue', 'codex-queue doctor test'] : ['--version'];
+  } else {
+    return { label: 'Notifications', status: 'warn', detail: `unsupported platform: ${platform}` };
+  }
+
+  try {
+    const result = spawnSync(command, args, {
+      shell: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8',
+      timeout: 5000,
+    });
+    if (result.error) {
+      return { label: 'Notifications', status: 'fail', detail: `${command}: ${result.error.message}` };
+    }
+    if (result.status !== 0) {
+      const stderr = typeof result.stderr === 'string' ? result.stderr.trim() : '';
+      return {
+        label: 'Notifications',
+        status: 'fail',
+        detail: `${command} exited with code ${result.status}${stderr ? `: ${stderr}` : ''}`,
+      };
+    }
+    return {
+      label: 'Notifications',
+      status: 'ok',
+      detail: notifyTest ? `${command} accepted a test notification` : `${command} is available`,
+    };
+  } catch (err) {
+    return { label: 'Notifications', status: 'fail', detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 async function checkDaemon(getDaemonStatus: () => Promise<DaemonStatusResult>): Promise<DoctorCheck> {
   try {
     const status = await getDaemonStatus();
@@ -147,7 +204,10 @@ function printCheck(check: DoctorCheck): void {
   console.log(`${icon} ${pc.bold(`${check.label}:`)} ${check.detail}`);
 }
 
-export async function doctorCommand(dependencies: DoctorDependencies = {}): Promise<void> {
+export async function doctorCommand(
+  dependencies: DoctorDependencies = {},
+  options: DoctorOptions = {}
+): Promise<void> {
   const codexBin = process.env.CQ_CODEX_BIN || 'codex';
   const spawnSync = dependencies.spawnSync || defaultSpawnSync;
   const getDaemonStatus = dependencies.getDaemonStatus || (() => new DaemonManager().getStatus());
@@ -160,6 +220,7 @@ export async function doctorCommand(dependencies: DoctorDependencies = {}): Prom
     checkDirectory('Logs directory', getLogsDir()),
     checkDatabase(),
     ...checkConfiguredHomes(),
+    checkNotifications(spawnSync, dependencies.platform || process.platform, options.notifyTest || false),
     await checkDaemon(getDaemonStatus),
   ];
 

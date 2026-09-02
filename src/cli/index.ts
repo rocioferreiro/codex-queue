@@ -143,7 +143,8 @@ export function createProgram(): Command {
   program
     .command('doctor')
     .description('Check Codex, storage, session aliases, and daemon health')
-    .action(doctorCommand);
+    .option('--notify-test', 'Send a test desktop notification')
+    .action((options) => doctorCommand({}, options));
 
   program
     .command('wait')

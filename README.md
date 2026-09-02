@@ -28,6 +28,21 @@ Codex CLI itself may still communicate with its configured service.
 - The Codex CLI installed, authenticated, and available as `codex` on `PATH`
 - A repository that Codex can access with its configured sandbox and permissions
 
+### Platform support
+
+The queue and worker are supported on macOS and Linux. Desktop notifications
+are platform integrations, not a requirement for running the queue:
+
+| Platform | Queue and worker | Desktop notifications |
+| --- | --- | --- |
+| macOS | Supported | Native Notification Center via `osascript` (title, subtitle, and sound) |
+| Linux with a desktop session | Supported | `notify-send` when `libnotify` is installed |
+| Headless Linux/server | Supported | Not available without a notification daemon; queue execution still works |
+| Windows | Not currently documented or tested | Not supported by the built-in adapter |
+
+On Debian or Ubuntu, install Linux notifications with `sudo apt install
+libnotify-bin`. Run `cq doctor` to check availability on the current machine.
+
 The runner invokes Codex with the equivalent of:
 
 ```text
@@ -197,7 +212,14 @@ runs the task.
 
 The worker sends a desktop notification when a task completes, fails, is
 interrupted, or enters `waiting_limit`. Set `CQ_NOTIFY=0` to disable desktop
-notifications. Notifications are best effort and never affect the queue.
+notifications. Run `cq doctor --notify-test` to verify that the native desktop
+notification command accepts a test notification. Notifications are best
+effort and never affect the queue; adapter errors are written to `worker.log`.
+
+Notifications use a status emoji, a short title, a status subtitle, and a
+status-specific sound where the platform supports it. Linux also uses
+standard desktop icon names. macOS does not allow `osascript` to select a
+custom notification icon; it uses the icon of the notifying script/process.
 
 ### Logs
 
