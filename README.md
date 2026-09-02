@@ -183,9 +183,10 @@ cq cancel 12    # pending, waiting_limit, or interrupted -> cancelled
 but use the worker for normal queue processing. A running job cannot be
 cancelled directly; stop the worker to interrupt it, then retry it if needed.
 
-`cq wait <id>` polls the local database and exits successfully only when the
-job reaches `completed`. It exits with a failure code for `failed`,
-`interrupted`, `cancelled`, a missing job, or a timeout.
+`cq wait <id>` polls the local database, streams assistant messages from the
+job log as they arrive, and exits successfully only when the job reaches
+`completed`. It exits with a failure code for `failed`, `interrupted`,
+`cancelled`, a missing job, or a timeout.
 
 ### Images and notifications
 

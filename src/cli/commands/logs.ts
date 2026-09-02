@@ -3,7 +3,7 @@ import readline from 'node:readline';
 import pc from 'picocolors';
 import { getJobById } from '../../db/jobs.js';
 import { getJobLogPath, getWorkerLogPath } from '../../storage/paths.js';
-import { formatCodexEventSummary } from '../../parser/events.js';
+import { extractCodexMessage, formatCodexEventSummary } from '../../parser/events.js';
 import type { CodexParsedEvent } from '../../types/job.js';
 
 function formatEventLine(rawLine: string): string | null {
@@ -13,6 +13,11 @@ function formatEventLine(rawLine: string): string | null {
   try {
     const event = JSON.parse(trimmed) as CodexParsedEvent;
     const type = event.type || 'event';
+
+    const message = extractCodexMessage(event);
+    if (message) {
+      return pc.green(`Codex: ${message}`);
+    }
 
     if (type === 'thread.started' && event.thread_id) {
       return `${pc.cyan('thread started')} (${pc.bold(event.thread_id)})`;

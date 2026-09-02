@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { JsonlParser, parseJsonlString } from '../src/parser/jsonl.js';
-import { extractThreadId, formatCodexEventSummary } from '../src/parser/events.js';
+import { extractCodexMessage, extractThreadId, formatCodexEventSummary } from '../src/parser/events.js';
 
 describe('JSONL Parser & Event Processing', () => {
   it('parses multiple JSON lines correctly', () => {
@@ -83,6 +83,22 @@ describe('JSONL Parser & Event Processing', () => {
     it('formats message events', () => {
       const summary = formatCodexEventSummary({ type: 'message.delta' });
       expect(summary).toBe('Message event: message.delta');
+    });
+  });
+
+  describe('extractCodexMessage', () => {
+    it('extracts the final assistant message from an item.completed event', () => {
+      expect(extractCodexMessage({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: 'ok' },
+      })).toBe('ok');
+    });
+
+    it('ignores command execution output', () => {
+      expect(extractCodexMessage({
+        type: 'item.completed',
+        item: { type: 'command_execution', aggregated_output: 'secret shell output' },
+      })).toBeNull();
     });
   });
 });

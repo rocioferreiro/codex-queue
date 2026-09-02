@@ -54,6 +54,22 @@ describe('waitForJob', () => {
     expect(result.status).toBe('failed');
   });
 
+  it('prints assistant messages while waiting', async () => {
+    const messages: string[] = [];
+    const result = await waitForJob(1, { interval: '1' }, {
+      getJob: () => jobWithStatus('completed'),
+      readLog: () => JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: 'ok' },
+      }),
+      onLog: () => undefined,
+      onMessage: (message) => messages.push(message),
+    });
+
+    expect(result.status).toBe('completed');
+    expect(messages).toEqual(['ok']);
+  });
+
   it('times out when a job never reaches a terminal state', async () => {
     let currentTime = 0;
     await expect(waitForJob(1, { interval: '10', timeout: '20' }, {

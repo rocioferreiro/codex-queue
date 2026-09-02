@@ -66,6 +66,30 @@ export function extractThreadId(event: unknown): string | null {
   return null;
 }
 
+/** Extract assistant-visible text from Codex JSONL message events. */
+export function extractCodexMessage(event: CodexParsedEvent): string | null {
+  if (!event || typeof event !== 'object') return null;
+
+  const rootType = String(event.type || event.event || '').toLowerCase();
+  const item = event.item && typeof event.item === 'object' ? event.item as Record<string, unknown> : null;
+  const itemType = item ? String(item.type || '').toLowerCase() : '';
+
+  if (item && (itemType === 'agent_message' || itemType === 'assistant_message')) {
+    if (typeof item.text === 'string' && item.text.trim()) return item.text;
+    if (typeof item.content === 'string' && item.content.trim()) return item.content;
+  }
+
+  if (
+    (rootType === 'agent_message' || rootType === 'assistant_message' || rootType === 'message') &&
+    typeof event.text === 'string' &&
+    event.text.trim()
+  ) {
+    return event.text;
+  }
+
+  return null;
+}
+
 /**
  * Formats a short human-readable summary of a Codex event for CLI streaming.
  */
@@ -76,6 +100,9 @@ export function formatCodexEventSummary(event: CodexParsedEvent): string | null 
 
   const type = String(event.type || event.event || '');
   if (!type) return null;
+
+  const message = extractCodexMessage(event);
+  if (message) return message;
 
   if (type.includes('thread') || type.includes('session')) {
     const threadId = extractThreadId(event);
