@@ -104,10 +104,16 @@ contain only letters and numbers.
 
 ## Installation
 
-The project is currently installed from source; an npm package release is not
-available yet.
+For normal use, install the latest published release from npm:
 
-### From source
+```bash
+npm install --global codex-queue
+cq --help
+```
+
+The package exposes both `cq` and `codex-queue` commands.
+
+### From source (development)
 
 ```bash
 git clone https://github.com/rocioferreiro/codex-queue.git
@@ -134,15 +140,12 @@ For development without building, use:
 pnpm dev -- --help
 ```
 
-The published release will add a global package-installation command once the
-package is available through npm.
-
 ## Quick start
 
 Start the detached worker once:
 
 ```bash
-node dist/bin/cq.js start
+cq start
 ```
 
 Queue tasks from any directory. The current directory is used as the
@@ -150,11 +153,11 @@ repository unless `--repo` is supplied.
 
 ```bash
 cd ~/projects/project-a
-node /path/to/codex-queue/dist/bin/cq.js add \
+cq add \
   "Implement user authentication with JWT"
 
 cd ~/projects/project-b
-node /path/to/codex-queue/dist/bin/cq.js add \
+cq add \
   "Hotfix the production memory leak" --priority high \
   --codex-home ~/.codex-work
 ```
@@ -162,19 +165,20 @@ node /path/to/codex-queue/dist/bin/cq.js add \
 Inspect the queue and job output:
 
 ```bash
-node /path/to/codex-queue/dist/bin/cq.js status
-node /path/to/codex-queue/dist/bin/cq.js list
-node /path/to/codex-queue/dist/bin/cq.js show 1
-node /path/to/codex-queue/dist/bin/cq.js logs 1
+cq status
+cq list
+cq show 1
+cq logs 1
 ```
 
 Stop the worker when you no longer need it:
 
 ```bash
-node /path/to/codex-queue/dist/bin/cq.js stop
+cq stop
 ```
 
-For the examples below, `cq` is shorthand for the built command shown above.
+When running from source, replace `cq` in these examples with
+`node dist/bin/cq.js`.
 
 ## CLI reference
 

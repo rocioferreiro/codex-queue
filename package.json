@@ -5,6 +5,17 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rocioferreiro/codex-queue.git"
+  },
+  "bugs": {
+    "url": "https://github.com/rocioferreiro/codex-queue/issues"
+  },
+  "homepage": "https://github.com/rocioferreiro/codex-queue#readme",
+  "engines": {
+    "node": ">=20"
+  },
   "bin": {
     "cq": "./dist/bin/cq.js",
     "codex-queue": "./dist/bin/cq.js"
@@ -17,6 +28,7 @@
   ],
   "scripts": {
     "build": "tsup && tsc --emitDeclarationOnly --declaration --outDir dist",
+    "prepack": "npm run build",
     "dev": "tsx src/cli/bin.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -30,7 +42,7 @@
     "ai",
     "automation"
   ],
-  "author": "",
+  "author": "Rocio Ferreiro",
   "license": "Apache-2.0",
   "dependencies": {
     "better-sqlite3": "^13.0.3",
