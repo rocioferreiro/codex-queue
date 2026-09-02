@@ -114,10 +114,12 @@ describe('QueueWorker', () => {
     runner.failWithLimitOnJobId = job.id;
 
     const logs: string[] = [];
+    const notifications: string[] = [];
     const worker = new QueueWorker(db, {
       pollIntervalMs: 10,
       runner,
       onLog: (msg) => logs.push(msg),
+      notify: (jobId, status, detail) => notifications.push(`${jobId}:${status}:${detail || ''}`),
     });
 
     const runPromise = worker.start();
@@ -136,6 +138,8 @@ describe('QueueWorker', () => {
     const updated = getJobById(job.id, db);
     expect(updated?.status).toBe('waiting_limit');
     expect(logs.some((l) => l.includes('usage limit'))).toBe(true);
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]).toContain(`${job.id}:waiting_limit:`);
   });
 
   it('aborts active runner on stop()', async () => {
@@ -155,5 +159,26 @@ describe('QueueWorker', () => {
     await runPromise;
 
     expect(runner.wasAborted).toBe(true);
+  });
+
+  it('continues processing when a notification callback throws', async () => {
+    const job = createJob({ prompt: 'Notification-safe task' }, db);
+    const runner = new MockJobRunner(db);
+    const worker = new QueueWorker(db, {
+      pollIntervalMs: 10,
+      runner,
+      notify: () => {
+        throw new Error('desktop notifier unavailable');
+      },
+    });
+
+    const runPromise = worker.start();
+    while (runner.completedJobIds.length < 1) {
+      await new Promise((r) => setTimeout(r, 15));
+    }
+
+    await worker.stop();
+    await runPromise;
+    expect(getJobById(job.id, db)?.status).toBe('completed');
   });
 });

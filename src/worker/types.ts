@@ -1,4 +1,7 @@
 import type { JobRunner, RunnerOptions } from '../runner/types.js';
+import type { JobStatus } from '../types/job.js';
+
+export type WorkerNotification = (jobId: number, status: JobStatus, detail?: string) => void;
 
 export interface WorkerOptions {
   /**
@@ -22,6 +25,8 @@ export interface WorkerOptions {
    * Options to pass down to each job runner invocation.
    */
   runnerOptions?: RunnerOptions;
+  /** Desktop notification callback. Defaults to the platform notification adapter. */
+  notify?: WorkerNotification;
 }
 
 export interface WorkerStatus {

@@ -6,7 +6,8 @@ import { claimNextRunnableJob, recoverRunningJobs } from '../db/jobs.js';
 import { JobExecutor } from '../execution/job-executor.js';
 import { getWorkerLogPath, ensureStorageDirs } from '../storage/paths.js';
 import { DaemonManager } from '../daemon/manager.js';
-import type { WorkerOptions, WorkerStatus } from './types.js';
+import { notifyJob } from '../notifications/index.js';
+import type { WorkerNotification, WorkerOptions, WorkerStatus } from './types.js';
 
 function formatTime(date: Date = new Date()): string {
   const pad = (n: number) => n.toString().padStart(2, '0');
@@ -40,6 +41,7 @@ export class QueueWorker {
   private onLog: (message: string) => void;
   private verbose: boolean;
   private runnerOptions: WorkerOptions['runnerOptions'];
+  private notify: WorkerNotification;
   private logFilePath: string;
 
   private isRunning = false;
@@ -57,6 +59,7 @@ export class QueueWorker {
     this.onLog = options.onLog || ((msg) => console.log(msg));
     this.verbose = options.verbose ?? false;
     this.runnerOptions = options.runnerOptions;
+    this.notify = options.notify || ((jobId, status, detail) => notifyJob(jobId, status, detail));
     this.logFilePath = getWorkerLogPath();
   }
 
@@ -172,6 +175,7 @@ export class QueueWorker {
 
       if (finalJob.status === 'completed') {
         this.log(`[${formatTime()}] ${pc.green(`job #${job.id} completed`)}`);
+        this.sendNotification(job.id, 'completed');
       } else if (finalJob.status === 'waiting_limit') {
         this.log(`[${formatTime()}] ${pc.yellow('Codex usage limit reached')}`);
 
@@ -210,13 +214,23 @@ export class QueueWorker {
         } else {
           this.log(`[${formatTime()}] job #${job.id} waiting for backoff retry`);
         }
+        this.sendNotification(
+          job.id,
+          'waiting_limit',
+          finalJob.next_attempt_at ? `next attempt ${formatDate(finalJob.next_attempt_at)}` : 'waiting for retry'
+        );
       } else if (finalJob.status === 'interrupted') {
         this.log(`[${formatTime()}] ${pc.yellow(`job #${job.id} interrupted`)}`);
+        this.sendNotification(job.id, 'interrupted');
       } else if (finalJob.status === 'failed') {
-        this.log(`[${formatTime()}] ${pc.red(`job #${job.id} failed: ${runnerResult.errorMessage || finalJob.last_error || 'unknown error'}`)}`);
+        const detail = runnerResult.errorMessage || finalJob.last_error || 'unknown error';
+        this.log(`[${formatTime()}] ${pc.red(`job #${job.id} failed: ${detail}`)}`);
+        this.sendNotification(job.id, 'failed', detail);
       }
     } catch (err) {
-      this.log(`[${formatTime()}] ${pc.red(`job #${job.id} execution error: ${err instanceof Error ? err.message : String(err)}`)}`);
+      const detail = err instanceof Error ? err.message : String(err);
+      this.log(`[${formatTime()}] ${pc.red(`job #${job.id} execution error: ${detail}`)}`);
+      this.sendNotification(job.id, 'failed', detail);
     } finally {
       this.activeJobId = null;
       executionResolve!();
@@ -235,6 +249,14 @@ export class QueueWorker {
       fs.appendFileSync(this.logFilePath, `${plain}\n`, 'utf8');
     } catch {
       // Ignore file append errors if filesystem is read-only
+    }
+  }
+
+  private sendNotification(jobId: number, status: Parameters<WorkerNotification>[1], detail?: string): void {
+    try {
+      this.notify(jobId, status, detail);
+    } catch {
+      // Notification adapters are optional integrations and must never stop the worker.
     }
   }
 }
