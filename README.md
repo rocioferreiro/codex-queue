@@ -3,9 +3,17 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
 
-`codex-queue` is a local, persistent task queue and background worker for the
-Codex CLI. Queue work from any repository, close your terminal, and let the
-worker execute jobs sequentially when Codex is available again.
+Ran out of Codex usage limits but still have prompts to run?
+
+`codex-queue` is a persistent local queue for Codex CLI prompts. Add work from
+any repository, close your terminal, and let the background worker execute jobs
+sequentially. When Codex reports a usage limit, `codex-queue` waits for the
+detected reset time and retries the job automatically.
+
+It does not bypass provider limits. It schedules work for when Codex is
+available again.
+
+> **In one sentence:** a local, multi-job, usage-limit-aware queue for Codex CLI.
 
 > **Project status:** early development (`0.x`). The CLI and storage format may
 > change between releases.
@@ -33,6 +41,22 @@ buffer. It does not bypass provider limits.
 Everything managed by `codex-queue` stays on your machine: the SQLite database,
 worker state, and job logs are stored under `~/.codex-queue` by default. The
 Codex CLI itself may still communicate with its configured service.
+
+## How is this different from `codex queue`?
+
+Recent Codex CLI versions also include a built-in `codex queue` command for
+queuing a message for an existing session:
+
+```bash
+codex queue --thread <session-uuid> --message "Run the tests"
+```
+
+That is useful when you want to send one message to one existing session. This
+project is for a different workflow: queue multiple independent jobs locally,
+run them across repositories, keep them after the terminal closes, wait for
+detected usage-limit resets, retry failed work, inspect logs, send desktop
+notifications, and resume sessions. Run `codex queue --help` to check the
+capabilities of the Codex CLI version installed on your machine.
 
 ## Requirements
 
@@ -179,6 +203,40 @@ cq stop
 
 When running from source, replace `cq` in these examples with
 `node dist/bin/cq.js`.
+
+## Frequently asked questions
+
+### Can I schedule messages in Codex after I hit the usage limit?
+
+Yes—if by messages you mean task prompts for the Codex CLI. Start the worker
+and add prompts before you run out of usage:
+
+```bash
+cq start
+cq add "Implement the billing tests"
+cq add "Review the authentication changes" --priority high
+```
+
+When Codex returns a usage-limit response, the job enters `waiting_limit` and
+is retried after the detected reset time. The queue is local and does not
+bypass usage limits.
+
+See the detailed guide: [Queue Codex prompts after a usage limit](docs/queue-after-codex-usage-limit.md).
+
+### Can I run Codex tasks overnight?
+
+Yes. `cq start` launches a detached worker that continues after the terminal is
+closed. Use `cq status`, `cq list`, and `cq logs <id>` to inspect progress.
+
+See [Run Codex tasks overnight](docs/run-codex-tasks-overnight.md).
+
+### Should I use `codex queue` or `codex-queue`?
+
+Use `codex queue` for a message to an existing session. Use `codex-queue` when
+you need a persistent local task queue, multiple jobs, cross-repository work,
+usage-limit-aware retries, logs, notifications, or session resume.
+
+See the comparison guide: [Codex CLI queue vs. codex-queue](docs/codex-cli-queue-vs-codex-queue.md).
 
 ## CLI reference
 
