@@ -187,11 +187,13 @@ The most common commands are:
 ```bash
 cq start                         # Start the detached worker
 cq add "Run the tests"           # Add a task for the current repository
+cq add "Run deployment checks" --at "2026-09-07T10:00:00-03:00" # Schedule a task
 cq status                        # Show worker and queue status
 cq list                          # List jobs
 cq show <id>                     # Inspect a job
 cq logs <id>                     # Read job output
 cq retry <id>                    # Retry an interrupted or failed job
+cq schedule <id> --at <time>     # Change the next attempt time
 cq cancel <id>                   # Cancel a pending or waiting job
 cq stop                          # Stop the worker
 ```

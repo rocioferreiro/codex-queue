@@ -76,6 +76,7 @@ export interface CreateJobInput {
   /** Image paths to attach to the initial Codex prompt. */
   image_paths?: string[];
   priority?: PriorityLevel | number | string;
+  next_attempt_at?: string;
 }
 
 export interface JobFilter {

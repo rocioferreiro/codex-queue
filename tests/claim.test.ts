@@ -63,6 +63,13 @@ describe('Job Claiming & Priority Ordering', () => {
     expect(claimed?.attempts).toBe(1);
   });
 
+  it('respects next_attempt_at for scheduled pending jobs', () => {
+    const job = createJob({ prompt: 'Scheduled task', next_attempt_at: '2026-09-07T13:00:00.000Z' }, db);
+
+    expect(claimNextRunnableJob('2026-09-07T12:00:00.000Z', db)).toBeNull();
+    expect(claimNextRunnableJob('2026-09-07T14:00:00.000Z', db)?.id).toBe(job.id);
+  });
+
   it('prevents duplicate execution between two simulated workers', () => {
     const job1 = createJob({ prompt: 'Task 1' }, db);
     const now = new Date().toISOString();

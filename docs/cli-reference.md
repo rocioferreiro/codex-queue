@@ -21,9 +21,10 @@ retry.
 ## Queue and job management
 
 ```bash
-# Add a task; priority is high, normal, or low.
+# Add a task; priority is high, normal, or low. `--at` accepts ISO 8601.
 cq add "Implement feature A"
 cq add "Fix a security vulnerability" --repo /path/to/repo --priority high
+cq add "Run deployment checks" --at "2026-09-07T10:00:00-03:00"
 cq add "Use the work session" --codex-home ~/.codex-work
 cq add "Use the work session" --codexwork
 cq add "Continue this existing task" --session-id <session-id>
@@ -47,6 +48,7 @@ cq wait 12 --timeout 3600000
 
 # Retry or cancel a job.
 cq retry 12
+cq schedule 12 --at "2026-09-07T12:30:00-03:00"
 cq cancel 12
 ```
 
@@ -58,6 +60,10 @@ cancelled directly; stop the worker to interrupt it, then retry it if needed.
 job log as they arrive, and exits successfully only when the job reaches
 `completed`. It exits with a failure code for `failed`, `interrupted`,
 `cancelled`, a missing job, or a timeout.
+
+`cq schedule <id> --at <time>` changes the next attempt time for a pending,
+waiting, failed, or interrupted job. Running, completed, and cancelled jobs
+cannot be scheduled.
 
 ## Session aliases
 

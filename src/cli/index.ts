@@ -16,6 +16,7 @@ import { doctorCommand } from './commands/doctor.js';
 import { waitCommand } from './commands/wait.js';
 import { readConfig } from '../config/aliases.js';
 import { resumeCommand } from './commands/resume.js';
+import { scheduleCommand } from './commands/schedule.js';
 
 function collectImages(value: string, previous: string[] = []): string[] {
   return previous.concat(value);
@@ -38,6 +39,7 @@ export function createProgram(): Command {
     .option('--session-id <id>', 'Resume this existing Codex session instead of starting a new one')
     .option('-i, --image <path>', 'Attach an image file; repeat or use comma-separated paths', collectImages, [])
     .option('-p, --priority <level>', 'Task priority: high, normal, or low', 'normal')
+    .option('--at <time>', 'Schedule the task for an ISO 8601 date/time')
     .action(addCommand);
 
   const aliasCommand = program.command('alias').description('Configure named Codex sessions for queued tasks');
@@ -127,6 +129,13 @@ export function createProgram(): Command {
     .description('Return an interrupted or failed job to pending state')
     .argument('<id>', 'Job ID to retry')
     .action(retryCommand);
+
+  program
+    .command('schedule')
+    .description('Change when a queued, failed, or interrupted job will next be attempted')
+    .argument('<id>', 'Job ID to schedule')
+    .requiredOption('--at <time>', 'ISO 8601 date/time for the next attempt')
+    .action(scheduleCommand);
 
   program
     .command('worker')
