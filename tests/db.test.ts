@@ -3,7 +3,15 @@ import type Database from 'better-sqlite3';
 import os from 'node:os';
 import path from 'node:path';
 import { initDatabase } from '../src/db/client.js';
-import { createJob, getJobById, listJobs, updateJobStatus, updateJobThreadId, deleteJob } from '../src/db/jobs.js';
+import {
+  createJob,
+  getJobById,
+  listJobs,
+  updateJobStatus,
+  updateJobThreadId,
+  deleteJob,
+  scheduleJob,
+} from '../src/db/jobs.js';
 
 describe('Database Layer', () => {
   let db: Database.Database;
@@ -29,6 +37,13 @@ describe('Database Layer', () => {
   it('creates a pending job with custom repo_path', () => {
     const job = createJob({ prompt: 'Fix bugs', repo_path: '/custom/repo' }, db);
     expect(job.repo_path).toBe('/custom/repo');
+  });
+
+  it('creates a job with a scheduled next attempt', () => {
+    const nextAttemptAt = '2026-09-07T13:00:00.000Z';
+    const job = createJob({ prompt: 'Scheduled task', next_attempt_at: nextAttemptAt }, db);
+    expect(job.next_attempt_at).toBe(nextAttemptAt);
+    expect(getJobById(job.id, db)?.next_attempt_at).toBe(nextAttemptAt);
   });
 
   it('persists a custom codex home for a job', () => {
@@ -117,5 +132,26 @@ describe('Database Layer', () => {
     const job = createJob({ prompt: 'To delete' }, db);
     expect(deleteJob(job.id, db)).toBe(true);
     expect(getJobById(job.id, db)).toBeNull();
+  });
+
+  it('reschedules a pending job', () => {
+    const job = createJob({ prompt: 'Reschedule me' }, db);
+    const nextAttemptAt = '2026-09-07T14:00:00.000Z';
+
+    const result = scheduleJob(job.id, nextAttemptAt, db);
+
+    expect(result.success).toBe(true);
+    expect(result.job?.status).toBe('pending');
+    expect(result.job?.next_attempt_at).toBe(nextAttemptAt);
+  });
+
+  it('does not reschedule a running job', () => {
+    const job = createJob({ prompt: 'Running task' }, db);
+    updateJobStatus(job.id, 'running', {}, db);
+
+    const result = scheduleJob(job.id, '2026-09-07T14:00:00.000Z', db);
+
+    expect(result.success).toBe(false);
+    expect(result.message).toContain('currently running');
   });
 });

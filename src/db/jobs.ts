@@ -33,11 +33,20 @@ export function createJob(input: CreateJobInput, db: Database.Database = getData
   const priority = parsePriority(input.priority);
 
   const stmt = db.prepare(`
-    INSERT INTO jobs (prompt, repo_path, codex_home, image_paths, status, thread_id, created_at, priority)
-    VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)
+    INSERT INTO jobs (prompt, repo_path, codex_home, image_paths, status, thread_id, created_at, next_attempt_at, priority)
+    VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?)
   `);
 
-  const result = stmt.run(input.prompt, repoPath, codexHome, JSON.stringify(imagePaths), sessionId, now, priority);
+  const result = stmt.run(
+    input.prompt,
+    repoPath,
+    codexHome,
+    JSON.stringify(imagePaths),
+    sessionId,
+    now,
+    input.next_attempt_at || null,
+    priority
+  );
   const id = Number(result.lastInsertRowid);
 
   return {
@@ -55,7 +64,7 @@ export function createJob(input: CreateJobInput, db: Database.Database = getData
     started_at: null,
     completed_at: null,
     attempts: 0,
-    next_attempt_at: null,
+    next_attempt_at: input.next_attempt_at || null,
     last_error: null,
     failure_kind: null,
     priority,
@@ -282,6 +291,46 @@ export function retryJob(
       started_at: null,
       completed_at: null,
       next_attempt_at: null,
+      last_error: null,
+      failure_kind: null,
+      exit_code: null,
+      error_message: null,
+    },
+    db
+  );
+
+  const updated = getJobById(id, db);
+  return { success: true, job: updated! };
+}
+
+/**
+ * Schedule a job for a specific time, returning it to the pending state if needed.
+ */
+export function scheduleJob(
+  id: number,
+  nextAttemptAt: string,
+  db: Database.Database = getDatabase()
+): { success: boolean; message?: string; job?: Job } {
+  const job = getJobById(id, db);
+  if (!job) {
+    return { success: false, message: `Job #${id} not found.` };
+  }
+
+  if (job.status === 'running') {
+    return { success: false, message: `Job #${id} is currently running and cannot be scheduled.` };
+  }
+
+  if (job.status === 'completed' || job.status === 'cancelled') {
+    return { success: false, message: `Job #${id} has status '${job.status}' and cannot be scheduled.` };
+  }
+
+  updateJobStatus(
+    id,
+    'pending',
+    {
+      started_at: null,
+      completed_at: null,
+      next_attempt_at: nextAttemptAt,
       last_error: null,
       failure_kind: null,
       exit_code: null,

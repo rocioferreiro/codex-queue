@@ -56,6 +56,44 @@ describe('CLI Integration', () => {
     expect(jobs[0].status).toBe('pending');
   });
 
+  it('adds a job scheduled with --at', async () => {
+    const program = createProgram();
+    program.exitOverride();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await program.parseAsync([
+      'node',
+      'cq',
+      'add',
+      'Scheduled task',
+      '--at',
+      '2026-09-07T10:00:00-03:00',
+    ]);
+
+    expect(listJobs()[0].next_attempt_at).toBe('2026-09-07T13:00:00.000Z');
+  });
+
+  it('changes a job next attempt with schedule', async () => {
+    const addProgram = createProgram();
+    addProgram.exitOverride();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    await addProgram.parseAsync(['node', 'cq', 'add', 'Reschedule me']);
+
+    const jobId = listJobs()[0].id;
+    const scheduleProgram = createProgram();
+    scheduleProgram.exitOverride();
+    await scheduleProgram.parseAsync([
+      'node',
+      'cq',
+      'schedule',
+      String(jobId),
+      '--at',
+      '2026-09-07T11:30:00-03:00',
+    ]);
+
+    expect(getJobById(jobId)?.next_attempt_at).toBe('2026-09-07T14:30:00.000Z');
+  });
+
   it('adds verified image attachments via CLI', async () => {
     const imagePath = path.join(tempDir, 'screen.png');
     fs.writeFileSync(imagePath, 'not really an image');

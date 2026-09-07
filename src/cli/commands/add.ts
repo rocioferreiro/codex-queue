@@ -2,10 +2,19 @@ import pc from 'picocolors';
 import { createJob } from '../../db/jobs.js';
 import type { PriorityLevel } from '../../types/job.js';
 import { readConfig } from '../../config/aliases.js';
+import { parseScheduledTime } from '../../scheduling.js';
 
 export async function addCommand(
   promptText: string,
-  options: { repo?: string; codexHome?: string; sessionId?: string; image?: string[]; priority?: string; [key: string]: unknown }
+  options: {
+    repo?: string;
+    codexHome?: string;
+    sessionId?: string;
+    image?: string[];
+    priority?: string;
+    at?: string;
+    [key: string]: unknown;
+  }
 ): Promise<void> {
   const prompt = promptText?.trim();
   if (!prompt) {
@@ -42,6 +51,7 @@ export async function addCommand(
       session_id: options.sessionId?.trim(),
       image_paths: options.image,
       priority,
+      next_attempt_at: options.at ? parseScheduledTime(options.at) : undefined,
     });
     console.log(pc.green(`✔ Job #${job.id} created successfully`));
     console.log(`  ${pc.bold('Status:')}    ${pc.yellow(job.status)}`);
@@ -56,6 +66,9 @@ export async function addCommand(
     }
     if (job.image_paths.length > 0) {
       console.log(`  ${pc.bold('Images:')}     ${job.image_paths.length}`);
+    }
+    if (job.next_attempt_at) {
+      console.log(`  ${pc.bold('Scheduled:')}  ${job.next_attempt_at}`);
     }
     console.log(`  ${pc.bold('Prompt:')}    ${job.prompt.length > 80 ? job.prompt.slice(0, 77) + '...' : job.prompt}`);
     console.log(`\nRun this job with: ${pc.cyan(`cq run ${job.id}`)} or start the worker with: ${pc.cyan('cq worker')}`);
